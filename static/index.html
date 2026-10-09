@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="cs" data-theme="dark" data-accent="amber">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>lumen</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='%23F2A33A'/%3E%3C/svg%3E">
+  <script>
+    // Nastaví motiv ještě před vykreslením, aby stránka neblikla.
+    try {
+      var s = JSON.parse(localStorage.getItem("lumen.settings") || "{}");
+      var t = s.theme || "system";
+      if (t === "system") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.dataset.theme = t;
+      document.documentElement.dataset.accent = s.accent || "amber";
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="/style.css?v=5">
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></symbol>
+  <symbol id="i-convert" viewBox="0 0 24 24"><path d="M4 8h13M13 4l4 4-4 4M20 16H7M11 12l-4 4 4 4"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+  <symbol id="i-paste" viewBox="0 0 24 24"><rect x="6" y="5" width="12" height="16" rx="2"/><path d="M9 5V4a1 1 0 011-1h4a1 1 0 011 1v1"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V5M7 9l5-5 5 5M5 20h14"/></symbol>
+  <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></symbol>
+</svg>
+
+<div class="glow" id="glow" aria-hidden="true"><img id="glowImg" alt="" referrerpolicy="no-referrer"></div>
+
+<nav class="rail" aria-label="Hlavní navigace">
+  <a class="brand" href="#/">lumen</a>
+  <div class="rail-links">
+    <a href="#/" data-route="download"><svg class="ico"><use href="#i-download"/></svg><span>Stáhnout</span></a>
+    <a href="#/remux" data-route="remux"><svg class="ico"><use href="#i-convert"/></svg><span>Převod</span></a>
+    <a href="#/sites" data-route="sites"><svg class="ico"><use href="#i-globe"/></svg><span>Weby</span></a>
+    <a href="#/settings" data-route="settings"><svg class="ico"><use href="#i-sliders"/></svg><span>Nastavení</span></a>
+  </div>
+</nav>
+
+<main>
+  <div id="banner" class="banner" role="status" hidden></div>
+
+  <!-- Stáhnout -->
+  <section class="view active" data-view="download" aria-labelledby="h-download">
+    <h1 class="wordmark" id="h-download">lumen</h1>
+
+    <form id="urlForm" class="pill" autocomplete="off">
+      <input id="urlInput" type="text" inputmode="url" spellcheck="false" placeholder="Vlož odkaz na video nebo skladbu" aria-label="Odkaz na video nebo skladbu">
+      <button type="button" id="pasteBtn" class="icon-btn" aria-label="Vložit ze schránky"><svg class="ico"><use href="#i-paste"/></svg></button>
+      <button type="submit" id="submitBtn" class="btn primary">Načíst</button>
+    </form>
+
+    <div class="mode-row">
+      <div class="seg" role="radiogroup" aria-label="Režim stahování">
+        <label><input type="radio" name="mode" value="auto" data-setting="mode"><span>Auto</span></label>
+        <label><input type="radio" name="mode" value="video" data-setting="mode"><span>Video</span></label>
+        <label><input type="radio" name="mode" value="audio" data-setting="mode"><span>Audio</span></label>
+      </div>
+      <p id="modeHint" class="muted small"></p>
+    </div>
+
+    <p id="quotaHint" class="quota-hint muted small" hidden></p>
+
+    <article id="preview" class="preview" hidden>
+      <div class="pv-media" id="pvMedia">
+        <img id="pvThumb" class="pv-thumb" alt="" referrerpolicy="no-referrer">
+        <button type="button" id="pvPlay" class="pv-play" hidden aria-label="Přehrát náhled"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg><span>Přehrát náhled</span></button>
+      </div>
+      <div class="pv-body">
+        <h2 id="pvTitle"></h2>
+        <p id="pvMeta" class="muted small"></p>
+        <div class="opts">
+          <label><span id="labA">Kvalita</span><select id="optA"></select></label>
+          <label><span id="labB">Formát</span><select id="optB"></select></label>
+        </div>
+        <button type="button" id="dlBtn" class="btn primary">Stáhnout</button>
+      </div>
+    </article>
+  </section>
+
+  <!-- Převod -->
+  <section class="view" data-view="remux" aria-labelledby="h-remux">
+    <h1 class="title" id="h-remux">Převod souboru</h1>
+    <p class="muted lead">Přebalí video do jiného kontejneru bez ztráty kvality, nebo z něj vytáhne zvuk. Soubor se nahraje do aplikace, zpracuje a objeví se ve frontě.</p>
+    <form id="remuxForm">
+      <label class="drop" id="drop">
+        <input type="file" id="fileInput" accept="video/*,audio/*,.mkv,.mov,.webm,.m4a,.opus,.flac">
+        <svg class="ico big"><use href="#i-upload"/></svg>
+        <span id="dropName">Přetáhni sem soubor nebo klikni a vyber</span>
+      </label>
+      <div class="row">
+        <label class="field"><span>Převést na</span>
+          <select id="remuxTarget">
+            <optgroup label="Video">
+              <option value="mp4">MP4</option><option value="mkv">MKV</option><option value="webm">WebM</option><option value="mov">MOV</option>
+            </optgroup>
+            <optgroup label="Jen zvuk">
+              <option value="mp3">MP3</option><option value="m4a">M4A</option><option value="opus">Opus</option><option value="flac">FLAC</option><option value="wav">WAV</option>
+            </optgroup>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="remuxReencode"><span>Překódovat (pomalejší, funguje i když prosté přebalení selže)</span></label>
+      </div>
+      <button type="submit" id="remuxBtn" class="btn primary" disabled>Převést</button>
+    </form>
+  </section>
+
+  <!-- Weby -->
+  <section class="view" data-view="sites" aria-labelledby="h-sites">
+    <h1 class="title" id="h-sites">Podporované weby</h1>
+    <p class="muted lead" id="sitesLead">Načítám seznam…</p>
+    <input id="sitesFilter" class="plain-input" type="search" placeholder="Hledat web, třeba soundcloud" aria-label="Hledat web">
+    <ul id="sitesList" class="chips"></ul>
+  </section>
+
+  <!-- Nastavení -->
+  <section class="view" data-view="settings" aria-labelledby="h-settings">
+    <h1 class="title" id="h-settings">Nastavení</h1>
+
+    <div id="accessGroup" hidden>
+      <h2 class="group">Přístup</h2>
+      <div class="setting">
+        <div>
+          <strong id="quotaTitle">Denní limit</strong>
+          <p class="muted small" id="quotaText"></p>
+        </div>
+      </div>
+      <div class="setting key-setting">
+        <div>
+          <strong>Přístupový klíč</strong>
+          <p class="muted small" id="keyHelp">Klíč odstraní denní limit stažení. Po zadání se natrvalo přiřadí k tomuhle zařízení a jinde nebude fungovat.</p>
+        </div>
+        <form id="keyForm" class="key-form" autocomplete="off">
+          <input id="keyInput" class="plain-input" type="text" spellcheck="false" autocapitalize="characters" autocomplete="off" placeholder="LMN-XXXXX-XXXXX-XXXXX-XXXXX" aria-label="Přístupový klíč">
+          <button type="submit" id="keySubmit" class="btn primary">Použít klíč</button>
+          <button type="button" id="keyClear" class="btn" hidden>Odebrat klíč</button>
+        </form>
+      </div>
+    </div>
+
+    <h2 class="group">Stahování</h2>
+    <div class="setting">
+      <div><strong>Hned stáhnout po odeslání</strong><p class="muted small">Přeskočí náhled a použije výchozí volby.</p></div>
+      <label class="switch"><input type="checkbox" data-setting="instant" aria-label="Hned stáhnout po odeslání"><i></i></label>
+    </div>
+    <div class="setting">
+      <div><strong>Uložit soubor po dokončení</strong><p class="muted small">Prohlížeč soubor stáhne sám, jakmile je hotový.</p></div>
+      <label class="switch"><input type="checkbox" data-setting="autoSave" aria-label="Uložit soubor po dokončení"><i></i></label>
+    </div>
+    <div class="setting">
+      <div><strong>Vložit obal do hudby</strong><p class="muted small">U MP3 a M4A přidá miniaturu jako obal alba.</p></div>
+      <label class="switch"><input type="checkbox" data-setting="embedCover" aria-label="Vložit obal do hudby"><i></i></label>
+    </div>
+    <div class="setting">
+      <div><strong>Přihlášení z prohlížeče</strong><p class="muted small">Pomůže u videí s věkovým omezením, nebo když YouTube chce přihlášení. Funguje jen když aplikace běží na stejném počítači jako prohlížeč.</p></div>
+      <select data-setting="cookiesFrom" aria-label="Přihlášení z prohlížeče">
+        <option value="">Nepoužívat</option>
+        <option value="firefox">Firefox</option>
+        <option value="chrome">Chrome</option>
+        <option value="edge">Edge</option>
+        <option value="brave">Brave</option>
+        <option value="opera">Opera</option>
+        <option value="vivaldi">Vivaldi</option>
+        <option value="safari">Safari</option>
+      </select>
+    </div>
+
+    <h2 class="group">Vzhled</h2>
+    <div class="setting">
+      <div><strong>Motiv</strong></div>
+      <div class="seg" role="radiogroup" aria-label="Motiv">
+        <label><input type="radio" name="theme" value="system" data-setting="theme"><span>Podle systému</span></label>
+        <label><input type="radio" name="theme" value="dark" data-setting="theme"><span>Tmavý</span></label>
+        <label><input type="radio" name="theme" value="light" data-setting="theme"><span>Světlý</span></label>
+      </div>
+    </div>
+    <div class="setting">
+      <div><strong>Barva zvýraznění</strong></div>
+      <div class="swatches" role="radiogroup" aria-label="Barva zvýraznění">
+        <label><input type="radio" name="accent" value="amber" data-setting="accent"><i style="--c:#F2A33A"></i><span class="sr">Jantarová</span></label>
+        <label><input type="radio" name="accent" value="violet" data-setting="accent"><i style="--c:#8B7CFF"></i><span class="sr">Fialová</span></label>
+        <label><input type="radio" name="accent" value="mint" data-setting="accent"><i style="--c:#4FD1A5"></i><span class="sr">Mátová</span></label>
+        <label><input type="radio" name="accent" value="coral" data-setting="accent"><i style="--c:#FF7A66"></i><span class="sr">Korálová</span></label>
+        <label><input type="radio" name="accent" value="sky" data-setting="accent"><i style="--c:#4DB3FF"></i><span class="sr">Nebeská</span></label>
+      </div>
+    </div>
+
+    <p class="muted small footnote" id="versionLine"></p>
+  </section>
+</main>
+
+<button id="queueBtn" class="fab" type="button" aria-label="Otevřít frontu a historii" aria-controls="queue" aria-expanded="false">
+  <svg class="ico"><use href="#i-list"/></svg>
+  <span id="badge" class="badge" hidden>0</span>
+</button>
+
+<aside id="queue" class="drawer" aria-label="Fronta a historie" inert>
+  <header>
+    <h2>Fronta a historie</h2>
+    <button type="button" id="queueClose" class="icon-btn" aria-label="Zavřít"><svg class="ico"><use href="#i-x"/></svg></button>
+  </header>
+  <ul id="queueList" class="jobs"></ul>
+  <footer><button type="button" id="clearBtn" class="link">Vyčistit hotové</button></footer>
+</aside>
+
+<dialog id="player" class="player" aria-label="Přehrávač">
+  <header>
+    <span id="playerTitle" class="player-title"></span>
+    <button type="button" id="playerClose" class="icon-btn" aria-label="Zavřít přehrávač"><svg class="ico"><use href="#i-x"/></svg></button>
+  </header>
+  <div id="playerBox" class="player-box"></div>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="/app.js?v=5" defer></script>
+</body>
+</html>

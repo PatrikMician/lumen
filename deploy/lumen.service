@@ -1,0 +1,32 @@
+[Unit]
+Description=Lumen
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=lumen
+Group=lumen
+WorkingDirectory=@APP_DIR@
+EnvironmentFile=/etc/lumen.env
+Environment=PATH=@APP_DIR@/.venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=DATA_DIR=/var/lib/lumen
+Environment=HOME=/var/lib/lumen
+Environment=XDG_CACHE_HOME=/var/lib/lumen/cache
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=@APP_DIR@/.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+Nice=10
+MemoryMax=2G
+
+# Lumen je veřejná služba na stroji s rodinnými daty, takže dostane jen to nejnutnější:
+# kód jen čte, zapisuje jen do svých dvou složek a soubory Cloudu ani disky vůbec nevidí.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/lumen /srv/lumen-downloads
+InaccessiblePaths=-/srv/cloud -/opt/cloud -/mnt/disk1 -/mnt/disk2 -/mnt/disk3 -/mnt/disk4
+
+[Install]
+WantedBy=multi-user.target

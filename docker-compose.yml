@@ -1,0 +1,19 @@
+services:
+  lumen:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      AUTH_USER: lumen
+      AUTH_PASSWORD: zmen-me          # nastav vlastni heslo!
+      KEEP_HOURS: "24"
+      # COOKIES_FILE: /cookies/cookies.txt
+    volumes:
+      - lumen-data:/data
+      - lumen-state:/app/data   # limity a přístupové klíče
+      # - ./cookies.txt:/cookies/cookies.txt:ro
+    restart: unless-stopped
+
+volumes:
+  lumen-data:
+  lumen-state:
