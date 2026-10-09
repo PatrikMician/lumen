@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Správa přístupových klíčů Lumenu na serveru:  lumenkeys add "Honza" | list | reset 2 | revoke 2
+# Spouští keys.py pod uživatelem `lumen`, ať jsou soubory s klíči čitelné pro službu.
+set -euo pipefail
+[[ $EUID -eq 0 ]] || exec sudo "$0" "$@"   # /etc/lumen.env čte jen root
+set -a
+. /etc/lumen.env
+set +a
+cd /opt/lumen
+exec sudo -u lumen -H env DATA_DIR="${DATA_DIR:-/var/lib/lumen}" /opt/lumen/.venv/bin/python keys.py "$@"

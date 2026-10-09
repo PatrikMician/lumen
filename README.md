@@ -122,28 +122,32 @@ Dockerfile, docker-compose.yml
 
 Stahování z YouTube a dalších služeb může být v rozporu s jejich podmínkami užívání. Používej aplikaci jen pro obsah, ke kterému máš práva, nebo pro osobní účely tam, kde to zákon dovoluje.
 
-## Nasazení na Ubuntu server (`update.sh`)
+## Server s gitem (update.sh)
 
-Kód leží ve složce vlastněné tebou (např. `/opt/lumen`, repo naklonované jako tvůj uživatel), službu pouští oddělený systémový uživatel `lumen`, který kód jen čte. Zapisuje jen do `/var/lib/lumen` (klíče, počítadla limitu) a `/srv/lumen-downloads` (stažená videa). Soubory domácího cloudu (`/srv/cloud`, `/opt/cloud`) služba vůbec nevidí.
+Tohle repo je určené pro server, kde kód leží v `/opt/lumen` a aktualizuje se jedním příkazem:
 
-```bash
-sudo ./update.sh           # git pull + případně závislosti + restart služby
-sudo ./update.sh --force   # přeinstaluje závislosti a aktualizuje yt-dlp (když YouTube přestane fungovat)
-sudo lumen-keys add "Honza"   # klíče (viz výše), bez cesty a bez python
-sudo journalctl -u lumen -n 40 --no-pager   # logy
+```
+cd /opt/lumen && git pull && sudo ./update.sh
 ```
 
-Nastavení je v `/etc/lumen.env` (vytvoří se poprvé, `update.sh` ho nepřepisuje). **AUTH_PASSWORD tam nedávej**, zamkl by web i pro lidi s klíčem.
+`update.sh` stáhne kód (nebo `--local` bez gitu), doinstaluje závislosti, aktualizuje yt-dlp, nainstaluje systemd službu `lumen` a restartuje ji. Nemění: `/etc/lumen.env` (nastavení), `/var/lib/lumen` (klíče a limity) a stažené soubory.
 
-Omezený disk pro stahování (aby plná videa nezaplnila systém), jednorázově, 20 GB:
+Rozdělení práv, ať má veřejná služba co nejmíň možností:
 
-```bash
-sudo mkdir -p /srv/lumen-downloads
-sudo fallocate -l 20G /var/lib/lumen-downloads.img
-sudo mkfs.ext4 -q -L lumen-dl /var/lib/lumen-downloads.img
-echo '/var/lib/lumen-downloads.img /srv/lumen-downloads ext4 loop,nofail 0 0' | sudo tee -a /etc/fstab
-sudo mount /srv/lumen-downloads
-sudo ./update.sh --force
+| Co | Kde | Komu patří |
+|---|---|---|
+| kód a `.venv` | `/opt/lumen` | správce serveru (dělá `git pull`) |
+| klíče a limity | `/var/lib/lumen` | uživatel `lumen` (služba) |
+| stažené soubory | `/srv/lumen-downloads/files` | uživatel `lumen`, omezený disk |
+
+Služba běží jako uživatel `lumen`, do kódu jen čte a nevidí `/srv/cloud` ani datové disky (`InaccessiblePaths`).
+
+Klíče spravuješ příkazem `lumenkeys` (nainstaluje ho `update.sh`):
+
 ```
-
-Služba poslouchá jen na `127.0.0.1:8000`, ven ji pouští Cloudflare Tunnel (`http://127.0.0.1:8000`).
+lumenkeys add "Honza"        # nový klíč na 1 zařízení
+lumenkeys add "Honza" --devices 2
+lumenkeys list
+lumenkeys reset 2            # uvolní zařízení klíče č. 2
+lumenkeys revoke 2           # zruší klíč č. 2
+```

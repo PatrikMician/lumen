@@ -1,4 +1,6 @@
+# Skripty a konfigurace pro server musí mít konce řádků LF, i když se commitují z Windows.
 *.sh text eol=lf
-*.service text eol=lf
-deploy/lumen-keys text eol=lf
 *.py text eol=lf
+deploy/lumenkeys text eol=lf
+deploy/*.service text eol=lf
+deploy/*.example text eol=lf
