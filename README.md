@@ -64,6 +64,10 @@ Důležité: **aplikace je bez hesla otevřená komukoliv, kdo zná adresu.** Na
 | `COOKIES_FILE` | prázdné | Cesta k `cookies.txt` exportovanému z prohlížeče (viz níže). |
 | `DAILY_LIMIT` | `5` | Kolik stažení za 24 hodin má návštěvník bez přístupového klíče. `0` = bez limitu. |
 | `DATA_DIR` | `./data` | Kde jsou počítadla limitu (`quota.db`) a klíče (`keys.json`). |
+| `SMTP_USER`, `SMTP_PASSWORD` | prázdné | Účet, ze kterého se posílá e-mail o žádosti o klíč (u Gmailu adresa a **heslo aplikace**). Bez nich se žádosti jen ukládají. |
+| `REQUEST_TO` | `SMTP_USER` | Kam přijde e-mail o nové žádosti. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY` | `smtp.gmail.com`, `587`, `starttls` | Poštovní server. Pro port 465 nastav `SMTP_SECURITY=ssl`. |
+| `MAX_REQUESTS_PER_DAY` | `50` | Kolik žádostí o klíč smí za den přijít celkem. |
 
 ### Varianta A: Docker
 ```
@@ -100,6 +104,19 @@ Přístupový klíč limit odstraní. Návštěvník ho vloží v **Nastavení �
 ```
 
 Zařízení se pozná podle cookie v prohlížeči. Když ji uživatel smaže, nebo přejde na jiný prohlížeč či telefon, klíč u něj přestane fungovat, dokud ho nepustíš příkazem `reset`.
+
+#### Žádost o klíč z webu
+
+V **Nastavení → Přístup** může návštěvník bez klíče zadat svůj e-mail a kliknout na **Požádat o klíč**. Žádost se uloží do `data/requests.json` a tobě přijde e-mail (z `SMTP_USER` na `REQUEST_TO`) s nastaveným **Reply-To na adresu žadatele**. Vyřídíš to dvěma kroky:
+
+```
+lumenkeys requests                          # čekající žádosti
+lumenkeys add "jan@seznam.cz" --request 3   # vytvoří klíč a označí žádost č. 3 jako vyřízenou
+```
+
+Pak v e-mailu klikneš na Odpovědět (jde rovnou žadateli) a vložíš klíč. Text odpovědi je navržený přímo v e-mailu o žádosti. Aplikace nikdy neposílá e-mail žadateli, jen tobě, takže ji nikdo nemůže zneužít k rozesílání spamu. Proti zneužití je navíc limit 3 žádosti na návštěvníka za den, `MAX_REQUESTS_PER_DAY` celkem a skryté pole proti robotům. Žádost zadanou z té samé adresy do 24 hodin aplikace nepošle znovu. `lumenkeys requests done 3` označí žádost jako vyřízenou bez vytváření klíče.
+
+Pro Gmail: v Google účtu zapni dvoufázové ověření, na https://myaccount.google.com/apppasswords vytvoř **heslo aplikace** a vlož ho do `/etc/lumen.env` jako `SMTP_PASSWORD` **bez mezer** (soubor čte i shell, mezery by ho rozbily). Obyčejné heslo k účtu nefunguje a nikdy ho tam nedávej. Po změně `/etc/lumen.env` spusť `sudo systemctl restart lumen`.
 
 V souboru `data/keys.json` jsou jen otisky klíčů, takže ztracený klíč nejde zobrazit znovu, jen vystavit nový. Soubor `data/` nikam nesdílej a zálohuj ho.
 
@@ -148,6 +165,7 @@ Klíče spravuješ příkazem `lumenkeys` (nainstaluje ho `update.sh`):
 lumenkeys add "Honza"        # nový klíč na 1 zařízení
 lumenkeys add "Honza" --devices 2
 lumenkeys list
+lumenkeys requests         # čekající žádosti o klíč z webu
 lumenkeys reset 2            # uvolní zařízení klíče č. 2
 lumenkeys revoke 2           # zruší klíč č. 2
 ```

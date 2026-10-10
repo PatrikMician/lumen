@@ -143,6 +143,21 @@
           <button type="button" id="keyClear" class="btn" hidden>Odebrat klíč</button>
         </form>
       </div>
+      <div class="setting key-setting" id="requestSetting" hidden>
+        <div>
+          <strong>Nemáš klíč?</strong>
+          <p class="muted small" id="requestHelp">Napiš svůj e-mail a pošli žádost. Klíč ti vystavím ručně a pošlu ho na tuhle adresu. Může to trvat i několik hodin, někdy déle.</p>
+        </div>
+        <form id="requestForm" class="key-form request-form" autocomplete="off" novalidate>
+          <input id="requestEmail" class="plain-input" type="email" inputmode="email" spellcheck="false" autocapitalize="none" autocomplete="email" placeholder="tvuj@email.cz" aria-label="Tvůj e-mail">
+          <input id="requestWebsite" class="hp" type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+          <button type="submit" id="requestSubmit" class="btn primary">Požádat o klíč</button>
+        </form>
+        <div id="requestSent" class="request-sent" hidden>
+          <p id="requestSentText"></p>
+          <button type="button" id="requestAgain" class="btn">Zadat jiný e-mail</button>
+        </div>
+      </div>
     </div>
 
     <h2 class="group">Stahování</h2>

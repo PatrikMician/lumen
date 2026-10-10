@@ -22,13 +22,13 @@ from typing import Optional
 from urllib.parse import urlparse
 
 import yt_dlp
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from yt_dlp.version import __version__ as YTDLP_VERSION
 
-from . import quota
+from . import keyrequests, quota
 
 # --------------------------------------------------------------------------
 # Nastavení (jde měnit proměnnými prostředí, viz README)
@@ -138,7 +138,7 @@ def save_owner(jid: str, sid: str):
 # --------------------------------------------------------------------------
 # Limity a kontrola vstupu
 # --------------------------------------------------------------------------
-_history: dict = {"download": {}, "info": {}, "key": {}}
+_history: dict = {"download": {}, "info": {}, "key": {}, "request": {}}
 _history_lock = threading.Lock()
 
 
@@ -364,6 +364,7 @@ def get_quota(request: Request):
     rec = current_key(request)
     out = {"enabled": DAILY_LIMIT > 0, "has_key": bool(rec), "label": rec["label"] if rec else None,
            "stale_key": bool(request.cookies.get(KEY_COOKIE)) and not rec,
+           "can_request": DAILY_LIMIT > 0 and not rec,
            "limit": DAILY_LIMIT, "used": 0, "remaining": DAILY_LIMIT, "reset_in": None}
     if DAILY_LIMIT > 0 and not rec:
         used, reset_in = quota.usage(quota.who(request))
@@ -389,6 +390,33 @@ def set_key(body: KeyIn, request: Request, response: Response):
         secure=request.headers.get("x-forwarded-proto", request.url.scheme) == "https",
     )
     return {"ok": True, "label": rec["label"]}
+
+
+class KeyRequestIn(BaseModel):
+    email: str
+    website: str = ""  # past na boty: lidem je pole skryté, roboti ho vyplní
+
+
+@app.post("/api/key/request")
+def request_key(body: KeyRequestIn, request: Request, background: BackgroundTasks):
+    """Žádost o přístupový klíč. Uloží se a provozovateli přijde e-mail s Reply-To na adresu žadatele."""
+    if DAILY_LIMIT <= 0:
+        raise HTTPException(404, "Tenhle server žádný limit nemá, klíč není potřeba.")
+    if current_key(request):
+        raise HTTPException(400, "Přístupový klíč už máš aktivní.")
+    if body.website.strip():
+        return {"ok": True, "email": ""}  # robot: tváříme se, že se to povedlo, a nic neděláme
+    email = keyrequests.valid_email(body.email)
+    if not email:
+        raise HTTPException(400, "Zadej platnou e-mailovou adresu, třeba jmeno@seznam.cz.")
+    rate_check("request", quota.who(request), 3, 24 * 3600,
+               "Dnes jsi už žádal několikrát. Počkej prosím na odpověď, klíč ti přijde e-mailem.")
+    rec, status = keyrequests.add_request(email)
+    if status == "full":
+        raise HTTPException(503, "Dnes už přišlo hodně žádostí. Zkus to prosím zítra.")
+    if status == "ok":
+        background.add_task(keyrequests.notify, rec)
+    return {"ok": True, "email": email}
 
 
 @app.delete("/api/key")

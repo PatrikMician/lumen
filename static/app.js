@@ -606,6 +606,7 @@
     $("#keyClear").hidden = !Q.has_key;
     $("#keyInput").hidden = Q.has_key;
     $("#keySubmit").hidden = Q.has_key;
+    renderRequest();
 
     if (!Q.enabled) { hint.hidden = true; return; }
 
@@ -636,7 +637,75 @@
     a.href = "#/settings";
     a.textContent = "Mám přístupový klíč";
     hint.append(a);
+    const b = document.createElement("a");
+    b.href = "#/settings";
+    b.textContent = "Požádat o klíč";
+    hint.append(" nebo ", b);
   }
+
+  /* Žádost o klíč: poslední odeslanou žádost si prohlížeč pamatuje, ať se po obnovení stránky nezeptá znovu */
+  const REQ_KEY = "lumen_key_request";
+  const REQ_KEEP = 14 * 24 * 3600 * 1000;
+  function lastRequest() {
+    try {
+      const r = JSON.parse(localStorage.getItem(REQ_KEY) || "null");
+      return r && r.email && Date.now() - r.ts < REQ_KEEP ? r : null;
+    } catch { return null; }
+  }
+  function rememberRequest(email) {
+    try { localStorage.setItem(REQ_KEY, JSON.stringify({ email, ts: Date.now() })); } catch { /* úložiště nemusí být dostupné */ }
+  }
+  function forgetRequest() {
+    try { localStorage.removeItem(REQ_KEY); } catch { /* nevadí */ }
+  }
+
+  function renderRequest() {
+    const box = $("#requestSetting");
+    box.hidden = !Q || !Q.can_request;
+    if (box.hidden) return;
+    const sent = lastRequest();
+    $("#requestForm").hidden = !!sent;
+    $("#requestSent").hidden = !sent;
+    if (sent) {
+      $("#requestHelp").textContent = "Teď už jen počkej na e-mail s klíčem.";
+      $("#requestSentText").replaceChildren(
+        "Klíč ti pošlu e-mailem na ",
+        Object.assign(document.createElement("strong"), { textContent: sent.email }),
+        ". Odpovídám ručně, takže to může chvíli trvat. Kdyby nic nepřišlo, podívej se i do spamu."
+      );
+    } else {
+      $("#requestHelp").textContent = "Napiš svůj e-mail a pošli žádost. Klíč ti vystavím ručně a pošlu ho na tuhle adresu. Může to trvat i několik hodin, někdy déle.";
+    }
+  }
+
+  $("#requestForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = $("#requestEmail").value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+      toast("Zadej platnou e-mailovou adresu, třeba jmeno@seznam.cz.", true);
+      $("#requestEmail").focus();
+      return;
+    }
+    const btn = $("#requestSubmit");
+    btn.disabled = true;
+    try {
+      const r = await api("/api/key/request", { method: "POST", body: { email, website: $("#requestWebsite").value } });
+      if (r.email) rememberRequest(r.email); else rememberRequest(email);
+      $("#requestEmail").value = "";
+      renderRequest();
+      toast("Žádost odeslána. Klíč ti přijde e-mailem.");
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $("#requestAgain").addEventListener("click", () => {
+    forgetRequest();
+    renderRequest();
+    $("#requestEmail").focus();
+  });
 
   async function loadQuota() {
     clearTimeout(quotaTimer);

@@ -5,6 +5,9 @@ Klíč se při prvním zadání přiřadí k prohlížeči (zařízení), kde by
 Použití (ve složce projektu, přes python z .venv, bez sudo):
     python keys.py add "Honza"                vytvoří klíč pro 1 zařízení a vypíše ho (zobrazí se jen teď)
     python keys.py add "Honza" --devices 2    klíč pro 2 zařízení (např. telefon a počítač té samé osoby)
+    python keys.py add "a@b.cz" --request 4   vytvoří klíč a označí žádost č. 4 jako vyřízenou
+    python keys.py requests                   čekající žádosti o klíč z webu (e-mail, kdy přišla)
+    python keys.py requests done 4            označí žádost č. 4 jako vyřízenou, aniž by se vytvářel klíč
     python keys.py list                       seznam klíčů a kolik zařízení mají obsazených
     python keys.py reset 3                    uvolní zařízení klíče č. 3 (nový telefon, vymazané cookies)
     python keys.py revoke 3                   zruší klíč č. 3 úplně
@@ -14,7 +17,7 @@ Aplikaci není potřeba restartovat, změny platí hned. Klíč se dá zadat pod
 import sys
 import time
 
-from backend import quota
+from backend import keyrequests, quota
 
 
 def main(argv):
@@ -32,14 +35,41 @@ def main(argv):
             except (IndexError, ValueError):
                 print("Za --devices musí být číslo, třeba: python keys.py add \"Honza\" --devices 2")
                 return 1
+        request_id = None
+        if "--request" in rest:
+            i = rest.index("--request")
+            try:
+                request_id = int(rest[i + 1])
+                del rest[i:i + 2]
+            except (IndexError, ValueError):
+                print("Za --request musí být číslo žádosti z `python keys.py requests`.")
+                return 1
         label = " ".join(rest) or "bez popisku"
         key = quota.add_key(label, devices)
+        if request_id is not None:
+            keyrequests.mark_done(request_id)
         print(f"Vytvořen klíč pro: {label} (zařízení: {max(1, devices)})")
         print()
         print(f"    {key}")
         print()
         print("Zkopíruj si ho teď, příště už ho nepůjde zobrazit (uložený je jen jeho otisk).")
         print("Při prvním zadání se přiřadí k tomu zařízení, kde ho dotyčný vloží.")
+    elif cmd == "requests":
+        if rest[:1] == ["done"] and len(rest) > 1:
+            ident = " ".join(rest[1:])
+            print("Označeno jako vyřízené." if keyrequests.mark_done(ident)
+                  else "Takovou žádost jsem nenašel (zkus číslo z `python keys.py requests`).")
+            return 0
+        open_requests = keyrequests.list_requests()
+        if not open_requests:
+            print("Žádné čekající žádosti o klíč.")
+        for r in open_requests:
+            when = time.strftime("%d.%m.%Y %H:%M", time.localtime(r.get("ts", 0)))
+            mail = {True: "e-mail odeslán", False: "e-mail se NEODESLAL", None: "e-mail se odesílá"}[r.get("mailed")]
+            print(f"{r['id']:>3}  {when}  {r['email']:<36} {mail}")
+        if open_requests:
+            print()
+            print('Vyřízení: sudo lumenkeys add "<e-mail>" --request <číslo>   a klíč pošli na ten e-mail.')
     elif cmd == "list":
         records = quota.list_keys()
         if not records:
