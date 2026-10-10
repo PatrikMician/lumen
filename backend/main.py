@@ -3,6 +3,7 @@
 Spuštění:  python run.py   (viz README.md)
 """
 import base64
+import html
 import ipaddress
 import os
 import re
@@ -23,7 +24,7 @@ from urllib.parse import urlparse
 
 import yt_dlp
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile, Request
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from yt_dlp.version import __version__ as YTDLP_VERSION
@@ -138,7 +139,7 @@ def save_owner(jid: str, sid: str):
 # --------------------------------------------------------------------------
 # Limity a kontrola vstupu
 # --------------------------------------------------------------------------
-_history: dict = {"download": {}, "info": {}, "key": {}, "request": {}}
+_history: dict = {"download": {}, "info": {}, "key": {}, "request": {}, "approve": {}}
 _history_lock = threading.Lock()
 
 
@@ -417,6 +418,66 @@ def request_key(body: KeyRequestIn, request: Request, background: BackgroundTask
     if status == "ok":
         background.add_task(keyrequests.notify, rec)
     return {"ok": True, "email": email}
+
+
+# --- Schválení žádosti odkazem z e-mailu -----------------------------------------
+def _page(title: str, body_html: str, status: int = 200) -> HTMLResponse:
+    doc = (
+        '<!doctype html><html lang="cs"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        '<meta name="robots" content="noindex">'
+        f"<title>{html.escape(title)}</title>"
+        "<style>body{font:16px/1.55 system-ui,sans-serif;max-width:520px;margin:12vh auto;padding:0 20px;color:#1d1b2e;background:#f6f4fb}"
+        "h1{font-size:1.5rem;margin:0 0 .6em}form{display:inline-block;margin:.4em .4em 0 0}"
+        "button{font:inherit;font-weight:600;padding:.7em 1.4em;border:0;border-radius:999px;cursor:pointer;background:#f4a43a;color:#1d1b2e}"
+        "button.no{background:#e4e0ef}code{display:block;margin:.8em 0;padding:.8em 1em;background:#fff;border-radius:10px;word-break:break-all}"
+        ".muted{color:#6a6580;font-size:.92rem}</style></head><body>"
+        f"{body_html}</body></html>"
+    )
+    return HTMLResponse(doc, status_code=status, headers={
+        "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex"})
+
+
+@app.get("/api/key/approve")
+def approve_page(request: Request, id: int, t: str):
+    """Potvrzovací stránka. Jen zobrazuje, nic nemění (e-mailové skenery odkazů by jinak žádost schválily samy)."""
+    rate_check("approve", quota.who(request), 30, 3600, "Moc pokusů. Zkus to za hodinu.")
+    rec = keyrequests.peek_request(id, t)
+    if not rec:
+        return _page("Odkaz neplatí", "<h1>Odkaz neplatí</h1><p>Žádost už je vyřízená, odkaz vypršel, nebo je neúplný. "
+                     "Čekající žádosti uvidíš na serveru příkazem <code>sudo lumenkeys requests</code>.</p>", 404)
+    mail = html.escape(rec["email"])
+    tok = html.escape(t, quote=True)
+    return _page("Žádost o klíč", f"""<h1>Žádost o klíč</h1>
+<p>Žádá <strong>{mail}</strong>.</p>
+<p class="muted">Po schválení se vytvoří klíč na {keyrequests.APPROVE_DEVICES} zařízení a pošle se na tuhle adresu.</p>
+<form method="post" action="/api/key/approve"><input type="hidden" name="id" value="{rec['id']}"><input type="hidden" name="t" value="{tok}">
+<button name="action" value="approve">Schválit a poslat klíč</button></form>
+<form method="post" action="/api/key/approve"><input type="hidden" name="id" value="{rec['id']}"><input type="hidden" name="t" value="{tok}">
+<button class="no" name="action" value="deny">Zamítnout</button></form>""")
+
+
+@app.post("/api/key/approve")
+def approve_action(request: Request, id: int = Form(...), t: str = Form(...), action: str = Form(...)):
+    rate_check("approve", quota.who(request), 30, 3600, "Moc pokusů. Zkus to za hodinu.")
+    if action not in ("approve", "deny"):
+        raise HTTPException(400, "Neznámá akce.")
+    rec = keyrequests.resolve_request(id, t, "approved" if action == "approve" else "denied")
+    if not rec:
+        return _page("Odkaz neplatí", "<h1>Odkaz neplatí</h1><p>Žádost už je vyřízená nebo odkaz vypršel.</p>", 404)
+    mail = html.escape(rec["email"])
+    if action == "deny":
+        return _page("Zamítnuto", f"<h1>Zamítnuto</h1><p>Žádost od <strong>{mail}</strong> je zamítnutá. Žadateli se nic neposílá.</p>")
+    key = quota.add_key(rec["email"], keyrequests.APPROVE_DEVICES)
+    try:
+        keyrequests.send_key_mail(rec["email"], key)
+    except Exception as exc:  # noqa: BLE001 - klíč už existuje, provozovatel ho musí dostat jinak
+        print(f"Klíč pro žádost č. {rec['id']} se nepodařilo odeslat: {type(exc).__name__}: {exc}", flush=True)
+        return _page("Klíč se neodeslal", f"""<h1>Klíč se nepodařilo odeslat</h1>
+<p>E-mail pro <strong>{mail}</strong> neodešel, ale klíč je vytvořený. Pošli mu ho sám (zobrazí se jen teď):</p>
+<code>{html.escape(key)}</code>""", 502)
+    return _page("Hotovo", f"<h1>Hotovo</h1><p>Klíč je vytvořený a odeslaný na <strong>{mail}</strong>.</p>"
+                 '<p class="muted">Kdyby e-mail nedorazil, podívej se žadateli do spamu. Klíč nejde zobrazit znovu, jen vystavit nový.</p>')
 
 
 @app.delete("/api/key")

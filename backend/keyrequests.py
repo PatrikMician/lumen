@@ -5,16 +5,20 @@ data/requests.json a provozovateli (REQUEST_TO) přijde e-mail, ve kterém je Re
 adresu žadatele, takže stačí odpovědět. Klíč pak provozovatel vytvoří příkazem `lumenkeys add`
 a pošle ho žadateli na jeho adresu.
 
-Aplikace nikdy neposílá e-mail žadateli, jen provozovateli, takže se nedá zneužít k rozesílání spamu.
+V e-mailu jsou odkazy Schválit a Zamítnout (jednorázový náhodný token, platí 14 dní, token se ukládá jen
+jako hash). Po schválení aplikace sama vytvoří klíč a pošle ho žadateli. Žadateli se tak nikdy nepošle nic
+bez provozovatelova souhlasu, takže se aplikace nedá zneužít k rozesílání spamu.
 Odeslání e-mailu je nastavené proměnnými prostředí (viz deploy/lumen.env.example). Bez nich se žádosti
-jen ukládají a vypíše je `lumenkeys requests`.
+jen ukládají a vyřídit se dají příkazem `lumenkeys requests`.
 
 Modul používá jen standardní knihovnu.
 """
+import hashlib
 import json
 import logging
 import os
 import re
+import secrets
 import smtplib
 import ssl
 import threading
@@ -37,9 +41,18 @@ MAIL_FROM = os.getenv("MAIL_FROM", "").strip() or SMTP_USER
 REQUEST_TO = os.getenv("REQUEST_TO", "").strip() or SMTP_USER
 MAX_REQUESTS_PER_DAY = int(os.getenv("MAX_REQUESTS_PER_DAY", "50"))  # celkem na celém serveru
 REPEAT_AFTER = 24 * 3600  # stejná adresa může žádat znovu až po 24 hodinách
+TOKEN_TTL = 14 * 86400  # jak dlouho jde žádost schválit odkazem z e-mailu
+PUBLIC_URL = os.getenv("PUBLIC_URL", "").strip().rstrip("/")  # např. https://lumen.mican.dpdns.org
+if PUBLIC_URL and not PUBLIC_URL.startswith(("http://", "https://")):
+    PUBLIC_URL = "https://" + PUBLIC_URL
+APPROVE_DEVICES = max(1, int(os.getenv("APPROVE_DEVICES", "1")))  # na kolik zařízení platí schválený klíč
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]{1,64}@[A-Za-z0-9\-]+(\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,24}")
 _lock = threading.Lock()
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256((token or "").encode()).hexdigest()
 
 
 def valid_email(raw: str):
@@ -88,16 +101,18 @@ def add_request(email: str):
                 return r, "duplicate"
         if sum(1 for r in records if now - r.get("ts", 0) < 86400) >= MAX_REQUESTS_PER_DAY:
             return None, "full"
+        token = secrets.token_urlsafe(32)
         rec = {
             "id": max((r.get("id", 0) for r in records), default=0) + 1,
             "email": email,
             "ts": int(now),
             "done": False,
             "mailed": None,  # None = zatím se neposílalo, True/False = výsledek odeslání
+            "token_hash": _hash_token(token),  # token samotný se neukládá, jen jeho otisk
         }
         records.append(rec)
         _write(records)
-    return rec, "ok"
+    return {**rec, "token": token}, "ok"  # token je jen v paměti, pro odkazy v e-mailu
 
 
 def list_requests(only_open: bool = True) -> list:
@@ -119,6 +134,35 @@ def mark_done(ident) -> bool:
     return hit
 
 
+def _token_ok(rec: dict, token: str) -> bool:
+    return (not rec.get("done") and bool(rec.get("token_hash"))
+            and secrets.compare_digest(rec["token_hash"], _hash_token(token))
+            and time.time() - rec.get("ts", 0) < TOKEN_TTL)
+
+
+def peek_request(rec_id: int, token: str):
+    """Vrátí čekající žádost, pokud token sedí, jinak None. Nic nemění (volá se při zobrazení stránky)."""
+    with _lock:
+        for r in _read():
+            if r.get("id") == rec_id and _token_ok(r, token):
+                return r
+    return None
+
+
+def resolve_request(rec_id: int, token: str, decision: str):
+    """Jednorázově vyřídí žádost (decision = "approved" nebo "denied"). Druhé použití stejného odkazu vrátí None."""
+    with _lock:
+        records = _read()
+        for r in records:
+            if r.get("id") == rec_id and _token_ok(r, token):
+                r["done"] = True
+                r["decision"] = decision
+                r["token_hash"] = ""
+                _write(records)
+                return r
+    return None
+
+
 def _mark_mailed(rec_id: int, ok: bool):
     with _lock:
         records = _read()
@@ -138,30 +182,73 @@ def build_mail(rec: dict) -> EmailMessage:
     msg["Reply-To"] = email  # odpověď jde rovnou žadateli
     msg["Date"] = formatdate(localtime=True)
     msg["Message-ID"] = make_msgid(domain="lumen.local")
-    msg.set_content(
+    head = (
         f"Někdo si na Lumenu žádá o přístupový klíč.\n"
         f"\n"
         f"E-mail žadatele: {email}\n"
         f"Odesláno:        {when}\n"
         f"Číslo žádosti:   {rec['id']}\n"
         f"\n"
-        f"1) Na serveru vytvoř klíč (a žádost se zároveň označí jako vyřízená):\n"
+    )
+    token = rec.get("token")
+    if PUBLIC_URL and token:
+        base = f"{PUBLIC_URL}/api/key/approve?id={rec['id']}&t={token}"
+        body = (
+            f"SCHVÁLIT (klíč se vytvoří a sám se pošle žadateli):\n"
+            f"{base}\n"
+            f"\n"
+            f"Na stránce, která se otevře, ještě potvrdíš tlačítkem. Odkaz platí 14 dní a jde použít jednou.\n"
+            f"Zamítnout můžeš na stejné stránce. Když nic neuděláš, žádost jen čeká.\n"
+            f"\n"
+            f"Ručně (bez odkazu): sudo lumenkeys add \"{email}\" --request {rec['id']}\n"
+        )
+    else:
+        body = (
+            f"1) Na serveru vytvoř klíč (a žádost se zároveň označí jako vyřízená):\n"
+            f"\n"
+            f"    sudo lumenkeys add \"{email}\" --request {rec['id']}\n"
+            f"\n"
+            f"2) Klikni na Odpovědět. Tahle zpráva má Reply-To nastavený na adresu žadatele, takže odpověď jde\n"
+            f"   rovnou jemu. Vlož do ní klíč.\n"
+            f"\n"
+            f"(Odkaz pro schválení jedním kliknutím se objeví po nastavení PUBLIC_URL v /etc/lumen.env.)\n"
+        )
+    msg.set_content(head + body + "\nSeznam čekajících žádostí: sudo lumenkeys requests\n")
+    return msg
+
+
+def build_key_mail(email: str, key: str) -> EmailMessage:
+    """E-mail žadateli s vystaveným klíčem. Odpověď na něj jde provozovateli."""
+    msg = EmailMessage()
+    msg["Subject"] = "Tvůj přístupový klíč pro Lumen"
+    msg["From"] = MAIL_FROM
+    msg["To"] = email
+    msg["Reply-To"] = REQUEST_TO
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain="lumen.local")
+    where = f"Otevři Lumen ({PUBLIC_URL}), jdi do Nastavení a v části Přístup klíč vlož." if PUBLIC_URL \
+        else "Otevři Lumen, jdi do Nastavení a v části Přístup klíč vlož."
+    msg.set_content(
+        f"Ahoj,\n"
         f"\n"
-        f"    sudo lumenkeys add \"{email}\" --request {rec['id']}\n"
+        f"tvoje žádost o přístup do Lumenu byla schválena. Tady je tvůj klíč:\n"
         f"\n"
-        f"2) Klikni na Odpovědět. Tahle zpráva má Reply-To nastavený na adresu žadatele, takže odpověď jde\n"
-        f"   rovnou jemu. Vlož do ní klíč, třeba takhle:\n"
+        f"    {key}\n"
         f"\n"
-        f"    Ahoj, tady je tvůj přístupový klíč pro Lumen:\n"
+        f"{where}\n"
         f"\n"
-        f"    LMN-XXXXX-XXXXX-XXXXX-XXXXX\n"
-        f"\n"
-        f"    Vlož ho v Lumenu v Nastavení, v části Přístup. Klíč se přiřadí k zařízení, kde ho zadáš\n"
-        f"    jako první, a na jiném zařízení nebude fungovat.\n"
-        f"\n"
-        f"Žádost nechceš vyřídit? Nic nedělej. Seznam čekajících žádostí: sudo lumenkeys requests\n"
+        f"Klíč se přiřadí k zařízení, kde ho zadáš jako první, a na jiném zařízení nebude fungovat. "
+        f"Nikomu ho proto neposílej. Kdyby sis měnil telefon nebo prohlížeč, odpověz na tenhle e-mail "
+        f"a klíč ti uvolním.\n"
     )
     return msg
+
+
+def send_key_mail(email: str, key: str):
+    """Pošle žadateli klíč. Při chybě vyvolá výjimku (volající ukáže klíč provozovateli, ať ho pošle ručně)."""
+    if not mail_configured():
+        raise RuntimeError("Není nastavený SMTP_USER a SMTP_PASSWORD.")
+    _send(build_key_mail(email, key))
 
 
 def _send(msg: EmailMessage):

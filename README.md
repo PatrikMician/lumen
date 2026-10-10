@@ -68,6 +68,8 @@ Důležité: **aplikace je bez hesla otevřená komukoliv, kdo zná adresu.** Na
 | `REQUEST_TO` | `SMTP_USER` | Kam přijde e-mail o nové žádosti. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY` | `smtp.gmail.com`, `587`, `starttls` | Poštovní server. Pro port 465 nastav `SMTP_SECURITY=ssl`. |
 | `MAX_REQUESTS_PER_DAY` | `50` | Kolik žádostí o klíč smí za den přijít celkem. |
+| `PUBLIC_URL` | prázdné | Veřejná adresa Lumenu (např. `https://lumen.mican.dpdns.org`). Podle ní se tvoří odkaz „Schválit“ v e-mailu o žádosti. |
+| `APPROVE_DEVICES` | `1` | Na kolik zařízení platí klíč vystavený schválením žádosti. |
 
 ### Varianta A: Docker
 ```
@@ -107,14 +109,22 @@ Zařízení se pozná podle cookie v prohlížeči. Když ji uživatel smaže, n
 
 #### Žádost o klíč z webu
 
-V **Nastavení → Přístup** může návštěvník bez klíče zadat svůj e-mail a kliknout na **Požádat o klíč**. Žádost se uloží do `data/requests.json` a tobě přijde e-mail (z `SMTP_USER` na `REQUEST_TO`) s nastaveným **Reply-To na adresu žadatele**. Vyřídíš to dvěma kroky:
+V **Nastavení → Přístup** může návštěvník bez klíče zadat svůj e-mail a kliknout na **Požádat o klíč**. Žádost se uloží do `data/requests.json` a tobě přijde e-mail (z `SMTP_USER` na `REQUEST_TO`) s odkazem **Schválit**.
+
+1. Klikneš na odkaz v e-mailu. Otevře se stránka Lumenu a na ní potvrdíš tlačítkem **Schválit a poslat klíč** (nebo **Zamítnout**). Potvrzení je zvlášť, aby žádost nespustil e-mailový skener odkazů.
+2. Aplikace vytvoří klíč (na `APPROVE_DEVICES` zařízení, výchozí 1) a pošle ho e-mailem žadateli. Odpověď žadatele na ten e-mail jde tobě.
+3. Kdyby odeslání žadateli selhalo, ukáže se klíč na té samé stránce a pošleš ho sám.
+
+Odkaz je na jedno použití, platí 14 dní a obsahuje dlouhý náhodný token (v `requests.json` je jen jeho otisk). Aplikace neposílá nic nikomu, dokud žádost sám neschválíš, takže se nedá zneužít k rozesílání spamu. Proti zneužití formuláře je navíc limit 3 žádosti na návštěvníka za den, `MAX_REQUESTS_PER_DAY` celkem a skryté pole proti robotům. Žádost zadanou z té samé adresy do 24 hodin aplikace nepošle znovu.
+
+Bez nastaveného `PUBLIC_URL` e-mail odkaz neobsahuje a žádost vyřídíš ručně:
 
 ```
 lumenkeys requests                          # čekající žádosti
 lumenkeys add "jan@seznam.cz" --request 3   # vytvoří klíč a označí žádost č. 3 jako vyřízenou
 ```
 
-Pak v e-mailu klikneš na Odpovědět (jde rovnou žadateli) a vložíš klíč. Text odpovědi je navržený přímo v e-mailu o žádosti. Aplikace nikdy neposílá e-mail žadateli, jen tobě, takže ji nikdo nemůže zneužít k rozesílání spamu. Proti zneužití je navíc limit 3 žádosti na návštěvníka za den, `MAX_REQUESTS_PER_DAY` celkem a skryté pole proti robotům. Žádost zadanou z té samé adresy do 24 hodin aplikace nepošle znovu. `lumenkeys requests done 3` označí žádost jako vyřízenou bez vytváření klíče.
+Pak v e-mailu klikneš na Odpovědět (jde rovnou žadateli) a vložíš klíč. `lumenkeys requests done 3` označí žádost jako vyřízenou bez vytváření klíče.
 
 Pro Gmail: v Google účtu zapni dvoufázové ověření, na https://myaccount.google.com/apppasswords vytvoř **heslo aplikace** a vlož ho do `/etc/lumen.env` jako `SMTP_PASSWORD` **bez mezer** (soubor čte i shell, mezery by ho rozbily). Obyčejné heslo k účtu nefunguje a nikdy ho tam nedávej. Po změně `/etc/lumen.env` spusť `sudo systemctl restart lumen`.
 
