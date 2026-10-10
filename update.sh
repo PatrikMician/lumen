@@ -44,7 +44,7 @@ fi
 [[ -d .venv ]] || { Log "Vytvářím .venv…"; As python3 -m venv .venv; }
 Log "Instaluji závislosti a aktualizuji yt-dlp…"
 As .venv/bin/pip install -q -r requirements.txt
-As .venv/bin/pip install -q -U "yt-dlp[default]"
+As .venv/bin/pip install -q -U "yt-dlp[default,curl-cffi]"
 chmod -R a+rX .   # služba (uživatel lumen) musí kód číst
 
 # ---- 4. Data, stahování, služba ---------------------------------------------------

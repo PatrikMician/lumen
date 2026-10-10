@@ -50,6 +50,7 @@ DAILY_LIMIT = int(os.getenv("DAILY_LIMIT", "5"))  # stažení za 24 h na návšt
 INFO_PER_HOUR = int(os.getenv("INFO_PER_HOUR", "60"))  # načtení náhledu na prohlížeč za hodinu
 MAX_DURATION_MIN = int(os.getenv("MAX_DURATION_MIN", "120"))  # nejdelší povolené video v minutách
 ALLOW_GENERIC = os.getenv("ALLOW_GENERIC", "0") == "1"  # obecný extraktor (libovolná stránka)
+IMPERSONATE = os.getenv("IMPERSONATE", "chrome").strip()  # napodobení prohlížeče pro weby, které vrací 403 (prázdné = vypnuto)
 
 BROWSERS = {"chrome", "firefox", "edge", "brave", "opera", "safari", "vivaldi", "chromium"}
 AUDIO_FORMATS = {"mp3", "m4a", "opus", "flac", "wav"}
@@ -303,7 +304,30 @@ def janitor():
 # --------------------------------------------------------------------------
 # yt-dlp
 # --------------------------------------------------------------------------
-def base_opts(cookies_from: Optional[str] = None) -> dict:
+NO_IMPERSONATE_HOSTS = ("youtube.com", "youtu.be", "googlevideo.com", "youtube-nocookie.com")
+
+
+@lru_cache(maxsize=1)
+def impersonate_target():
+    """Cíl pro napodobení prohlížeče, nebo None, když je vypnuté či chybí knihovna curl_cffi
+    (bez ní by yt-dlp s volbou impersonate selhal u každého stažení)."""
+    if not IMPERSONATE:
+        return None
+    try:
+        import curl_cffi  # noqa: F401
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+        return ImpersonateTarget.from_str(IMPERSONATE)
+    except Exception:  # noqa: BLE001 - knihovna chybí nebo je nekompatibilní verze
+        return None
+
+
+def wants_impersonation(url: Optional[str]) -> bool:
+    """Napodobení prohlížeče se zapíná jen pro weby mimo YouTube, kde by mohlo spíš uškodit."""
+    host = (urlparse(url or "").hostname or "").lower()
+    return bool(host) and not any(host == h or host.endswith("." + h) for h in NO_IMPERSONATE_HOSTS)
+
+
+def base_opts(cookies_from: Optional[str] = None, url: Optional[str] = None) -> dict:
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -318,6 +342,9 @@ def base_opts(cookies_from: Optional[str] = None) -> dict:
         opts["allowed_extractors"] = ["default", "-generic"]
     if FFMPEG and not FFMPEG_IN_PATH:
         opts["ffmpeg_location"] = FFMPEG
+    target = impersonate_target()
+    if target is not None and wants_impersonation(url):
+        opts["impersonate"] = target
     if COOKIES_FILE and Path(COOKIES_FILE).is_file():
         opts["cookiefile"] = COOKIES_FILE
     elif cookies_from in BROWSERS:
@@ -349,6 +376,7 @@ def health():
         "ytdlp": YTDLP_VERSION,
         "ffmpeg": bool(FFMPEG),
         "deno": bool(shutil.which("deno")),
+        "impersonate": bool(impersonate_target()),
         "auth": bool(AUTH_PASSWORD),
         "keep_hours": KEEP_HOURS,
         "daily_limit": DAILY_LIMIT,
@@ -490,7 +518,7 @@ def clear_key(response: Response):
 def info(body: UrlIn, request: Request):
     url = clean_url(body.url)
     rate_check("info", request.state.sid, INFO_PER_HOUR, 3600, "Moc rychle za sebou. Zkus to za chvíli.")
-    opts = base_opts(body.cookies_from)
+    opts = base_opts(body.cookies_from, url)
     opts["skip_download"] = True
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -551,7 +579,7 @@ def run_download(jid: str, url: str, body: DownloadIn):
             job.update(status="processing", stage="Zpracovává se", percent=99.0, speed=None, eta=None)
 
     filt_state: dict = {}
-    opts = base_opts(body.cookies_from)
+    opts = base_opts(body.cookies_from, url)
     opts.update(
         match_filter=video_filter(filt_state),
         outtmpl=str(out_dir / "%(title).120B [%(id)s].%(ext)s"),
@@ -753,7 +781,7 @@ def resolve_preview(sid: str, url: str) -> dict:
         return hit
     rate_check("info", sid, INFO_PER_HOUR, 3600, "Moc rychle za sebou. Zkus to za chvíli.")
     state: dict = {}
-    opts = base_opts()
+    opts = base_opts(url=url)
     opts.update(skip_download=True, format=PREVIEW_FORMAT, match_filter=video_filter(state))
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:

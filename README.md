@@ -68,6 +68,7 @@ Důležité: **aplikace je bez hesla otevřená komukoliv, kdo zná adresu.** Na
 | `REQUEST_TO` | `SMTP_USER` | Kam přijde e-mail o nové žádosti. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY` | `smtp.gmail.com`, `587`, `starttls` | Poštovní server. Pro port 465 nastav `SMTP_SECURITY=ssl`. |
 | `MAX_REQUESTS_PER_DAY` | `50` | Kolik žádostí o klíč smí za den přijít celkem. |
+| `IMPERSONATE` | `chrome` | Napodobení prohlížeče (knihovna `curl-cffi`) pro weby, které jinak vrací chybu 403. Na YouTube se nepoužívá. Prázdné = vypnuto. |
 | `PUBLIC_URL` | prázdné | Veřejná adresa Lumenu (např. `https://lumen.mican.dpdns.org`). Podle ní se tvoří odkaz „Schválit“ v e-mailu o žádosti. |
 | `APPROVE_DEVICES` | `1` | Na kolik zařízení platí klíč vystavený schválením žádosti. |
 
