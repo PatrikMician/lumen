@@ -327,6 +327,8 @@ select:disabled { opacity: .5; }
   transition: opacity .2s, transform .2s;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.has-help.show { pointer-events: auto; }
+.toast-help { color: inherit; font-weight: 700; text-decoration: underline; white-space: nowrap; }
 .toast.error { background: var(--danger); color: var(--ink); }
 [data-theme="light"] .toast.error { color: #fff; }
 

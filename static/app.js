@@ -96,12 +96,25 @@
   let toastTimer;
   function toast(message, isError = false) {
     const el = $("#toast");
-    el.textContent = message;
+    el.replaceChildren(document.createTextNode(message));
+    // u chyby, kterou nápověda zná, se přidá odkaz s kódem
+    const entry = isError && window.LumenHelp ? LumenHelp.find(message) : null;
+    if (entry) {
+      const a = document.createElement("a");
+      a.className = "toast-help";
+      a.href = LumenHelp.url(entry, message);
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.textContent = "Pomoc " + entry.code;
+      el.append(" ", a);
+    }
+    el.classList.toggle("has-help", !!entry);
     el.classList.toggle("error", isError);
     el.classList.add("show");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove("show"), isError ? 6500 : 2800);
+    toastTimer = setTimeout(() => el.classList.remove("show"), isError ? (entry ? 12000 : 6500) : 2800);
   }
+  if (window.LumenHelp) LumenHelp.load();
 
   /* ---------- Navigace ---------- */
   const ROUTES = ["download", "remux", "sites", "settings"];
@@ -381,7 +394,7 @@
       '<div class="job-main">' +
         '<p class="job-title"></p><p class="job-status"></p>' +
         '<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"><i></i></div>' +
-        '<div class="job-actions"><button type="button" class="link play" hidden>Přehrát</button><a class="link save" download hidden>Uložit</a><button type="button" class="link act"></button></div>' +
+        '<div class="job-actions"><button type="button" class="link play" hidden>Přehrát</button><a class="link save" download hidden>Uložit</a><a class="link help" target="_blank" rel="noopener" hidden></a><button type="button" class="link act"></button></div>' +
       "</div>";
     $(".play", el).addEventListener("click", () => openPlayer(el.dataset.id, el.dataset.filename || ""));
     $(".act", el).addEventListener("click", async () => {
@@ -423,6 +436,15 @@
     save.hidden = j.status !== "done";
     if (j.status === "done") save.href = "/api/jobs/" + j.id + "/file";
     $(".act", el).textContent = isActive(j) ? "Zrušit" : "Odebrat";
+
+    // u chyby tlačítko s kódem a odkazem na nápovědu (neznámá chyba dostane obecný kód E999)
+    const help = $(".help", el);
+    const entry = j.status === "error" && window.LumenHelp ? (LumenHelp.find(j.error) || LumenHelp.fallback()) : null;
+    help.hidden = !entry;
+    if (entry) {
+      help.href = LumenHelp.url(entry, j.error);
+      help.textContent = "Jak to opravit · " + entry.code;
+    }
   }
 
   function renderQueue() {
@@ -749,6 +771,9 @@
   async function loadHealth() {
     try {
       const h = await api("/api/health");
+      // volba "Přihlášení z prohlížeče" funguje jen doma, na serveru by způsobila chybu, tak se tam schová
+      const cookiesRow = document.querySelector('[data-setting="cookiesFrom"]');
+      if (cookiesRow && cookiesRow.closest(".setting")) cookiesRow.closest(".setting").hidden = !h.browser_cookies;
       $("#versionLine").textContent = `yt-dlp ${h.ytdlp}. Při potížích s YouTube ho nejdřív aktualizuj (postup je v README).`;
       const msgs = [];
       if (!h.ffmpeg) msgs.push("Chybí ffmpeg. Bez něj nejde spojit video se zvukem ani převádět formáty.");

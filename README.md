@@ -61,6 +61,7 @@ Důležité: **aplikace je bez hesla otevřená komukoliv, kdo zná adresu.** Na
 | `KEEP_HOURS` | `24` | Za jak dlouho se hotové soubory smažou. |
 | `MAX_PARALLEL` | `2` | Kolik úloh běží současně. |
 | `MAX_UPLOAD_MB` | `2048` | Maximální velikost nahraného souboru při převodu. |
+| `ALLOW_BROWSER_COOKIES` | `0` | `1` povolí volbu „Přihlášení z prohlížeče“ (čtení cookies z prohlížeče na stejném počítači). Na serveru nech `0`, tam prohlížeč není. |
 | `COOKIES_FILE` | prázdné | Cesta k `cookies.txt` exportovanému z prohlížeče (viz níže). |
 | `DAILY_LIMIT` | `5` | Kolik stažení za 24 hodin má návštěvník bez přístupového klíče. `0` = bez limitu. |
 | `DATA_DIR` | `./data` | Kde jsou počítadla limitu (`quota.db`) a klíče (`keys.json`). |

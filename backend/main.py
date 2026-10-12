@@ -50,6 +50,9 @@ DAILY_LIMIT = int(os.getenv("DAILY_LIMIT", "5"))  # stažení za 24 h na návšt
 INFO_PER_HOUR = int(os.getenv("INFO_PER_HOUR", "60"))  # načtení náhledu na prohlížeč za hodinu
 MAX_DURATION_MIN = int(os.getenv("MAX_DURATION_MIN", "120"))  # nejdelší povolené video v minutách
 ALLOW_GENERIC = os.getenv("ALLOW_GENERIC", "0") == "1"  # obecný extraktor (libovolná stránka)
+# Cookies z prohlížeče má smysl číst jen tehdy, když aplikace běží na stejném počítači jako prohlížeč (doma).
+# Na serveru žádný prohlížeč není a návštěvník by dostal chybu "could not find chrome cookies database".
+ALLOW_BROWSER_COOKIES = os.getenv("ALLOW_BROWSER_COOKIES", "0") == "1"
 IMPERSONATE = os.getenv("IMPERSONATE", "chrome").strip()  # napodobení prohlížeče pro weby, které vrací 403 (prázdné = vypnuto)
 
 BROWSERS = {"chrome", "firefox", "edge", "brave", "opera", "safari", "vivaldi", "chromium"}
@@ -347,7 +350,7 @@ def base_opts(cookies_from: Optional[str] = None, url: Optional[str] = None) -> 
         opts["impersonate"] = target
     if COOKIES_FILE and Path(COOKIES_FILE).is_file():
         opts["cookiefile"] = COOKIES_FILE
-    elif cookies_from in BROWSERS:
+    elif ALLOW_BROWSER_COOKIES and cookies_from in BROWSERS:
         opts["cookiesfrombrowser"] = (cookies_from,)
     return opts
 
@@ -377,6 +380,7 @@ def health():
         "ffmpeg": bool(FFMPEG),
         "deno": bool(shutil.which("deno")),
         "impersonate": bool(impersonate_target()),
+        "browser_cookies": ALLOW_BROWSER_COOKIES,
         "auth": bool(AUTH_PASSWORD),
         "keep_hours": KEEP_HOURS,
         "daily_limit": DAILY_LIMIT,

@@ -1,0 +1,452 @@
+{
+ "version": 1,
+ "errors": [
+  {
+   "code": "E100",
+   "group": "Odkaz",
+   "title": "Odkaz nejde použít",
+   "summary": "Lumen ten odkaz nepřijal. Chybí v něm začátek, je zkopírovaný nedokončený, nebo ho server z bezpečnostních důvodů nepovoluje.",
+   "steps": [
+    "Zkopíruj celý odkaz z adresního řádku prohlížeče, nebo v aplikaci použij tlačítko Sdílet → Kopírovat odkaz.",
+    "Odkaz musí začínat http:// nebo https://.",
+    "Odkaz neupravuj a nepřidávej do něj mezery ani další text.",
+    "Pokud jde o odkaz z lokální sítě nebo z počítače (třeba 192.168…), ten server z bezpečnostních důvodů nepovolí."
+   ],
+   "match": [
+    "not a valid URL",
+    "Odkaz musí začínat",
+    "Odkaz je příliš dlouhý",
+    "server nepovolí",
+    "Nejdřív vlož odkaz"
+   ]
+  },
+  {
+   "code": "E101",
+   "group": "Odkaz",
+   "title": "Tenhle web Lumen neumí",
+   "summary": "Odkaz vede na stránku, ze které Lumen nedokáže stahovat, nebo na stránku, kde není přímo video (třeba výpis kanálu nebo hlavní strana).",
+   "steps": [
+    "Otevři přímo stránku s jedním videem a zkopíruj její odkaz.",
+    "V záložce Weby zjistíš, které weby Lumen umí. Pokud tam ten tvůj není, stáhnout z něj nepůjde.",
+    "Odkazy na přímý soubor (.mp4 a podobně) nebo na obecné stránky Lumen záměrně nepodporuje."
+   ],
+   "match": [
+    "Unsupported URL",
+    "unable to extract",
+    "Unable to extract"
+   ]
+  },
+  {
+   "code": "E102",
+   "group": "Odkaz",
+   "title": "K odkazu se nic nenašlo",
+   "summary": "Odkaz je v pořádku, ale Lumen na stránce nenašel žádné stažitelné video nebo je seznam prázdný.",
+   "steps": [
+    "Zkus odkaz otevřít v prohlížeči a ověř, že se video přehraje.",
+    "U seznamů skladeb (playlistů) Lumen stahuje jen první video. Otevři přímo to, které chceš.",
+    "Pokud video vyžaduje přihlášení nebo předplatné, Lumen ho nestáhne."
+   ],
+   "match": [
+    "nic zjistit",
+    "Seznam nepřehrávání je prázdný",
+    "No video formats found",
+    "no video could be found",
+    "There's no video"
+   ]
+  },
+  {
+   "code": "E110",
+   "group": "Video",
+   "title": "YouTube chce potvrdit, že nejsi robot",
+   "summary": "YouTube vyhodnotil server jako podezřelý a odmítl video vydat. Děje se to u serverů často a bývá to dočasné.",
+   "steps": [
+    "Zkus to za pár minut nebo za hodinu znovu.",
+    "Zkus jiné video, někdy je zablokované jen některé.",
+    "Pokud se to děje pořád, napiš provozovateli Lumenu a přilož kód chyby E110. Pomůže mu aktualizace nebo přihlášení serveru k YouTube."
+   ],
+   "match": [
+    "not a bot",
+    "confirm you.re not a bot"
+   ],
+   "operator": "Aktualizuj yt-dlp (cd /opt/lumen && sudo bash ./update.sh). Pokud to nepomůže, exportuj cookies z přihlášeného prohlížeče (rozšíření „Get cookies.txt LOCALLY“), nahraj je na server jako /var/lib/lumen/cookies.txt (vlastník lumen, práva 600) a do /etc/lumen.env přidej COOKIES_FILE=/var/lib/lumen/cookies.txt. Pak sudo systemctl restart lumen. Cookies jsou citlivé jako heslo, nikam je neposílej."
+  },
+  {
+   "code": "E111",
+   "group": "Video",
+   "title": "Video je soukromé nebo jen pro členy",
+   "summary": "K videu má přístup jen majitel nebo vybraní lidé (soukromé video, členství v kanálu, placený obsah). Lumen se nepřihlašuje, takže ho nestáhne.",
+   "steps": [
+    "Zkus video otevřít v prohlížeči bez přihlášení. Pokud se nepřehraje, Lumen ho nestáhne.",
+    "Požádej autora, aby video zveřejnil, nebo použij video, které je veřejné."
+   ],
+   "match": [
+    "Private video",
+    "This video is private",
+    "members-only",
+    "Join this channel",
+    "login required",
+    "Login required",
+    "requires authentication",
+    "premium",
+    "Sign in if you've been granted access"
+   ]
+  },
+  {
+   "code": "E112",
+   "group": "Video",
+   "title": "Video má věkové omezení",
+   "summary": "Video je označené jako nevhodné pro některé diváky a platforma chce potvrdit věk přihlášením. Lumen se nepřihlašuje.",
+   "steps": [
+    "Zkus stejné video z jiného zdroje (jiný web nebo jiný odkaz).",
+    "Pokud tě video zajímá, můžeš provozovatele požádat o pomoc. Kód chyby je E112."
+   ],
+   "match": [
+    "age-restricted",
+    "age restricted",
+    "confirm your age",
+    "inappropriate for some users",
+    "Sign in to confirm your age"
+   ],
+   "operator": "Věkově omezená videa na YouTube vyžadují přihlášený účet. Pomůže COOKIES_FILE (viz E110)."
+  },
+  {
+   "code": "E113",
+   "group": "Video",
+   "title": "Video není dostupné",
+   "summary": "Video bylo smazáno, skryto, zablokováno z autorskoprávních důvodů, nebo odkaz nikdy neexistoval.",
+   "steps": [
+    "Otevři odkaz v prohlížeči a ověř, že se video přehraje.",
+    "Zkontroluj, že je odkaz zkopírovaný celý a bez překlepu.",
+    "Pokud se video v prohlížeči přehraje a v Lumenu ne, napiš provozovateli a přilož kód E113."
+   ],
+   "match": [
+    "Video unavailable",
+    "video is unavailable",
+    "has been removed",
+    "no longer available",
+    "account associated with this video has been terminated",
+    "does not exist",
+    "HTTP Error 404",
+    "copyright",
+    "not available on this app"
+   ]
+  },
+  {
+   "code": "E114",
+   "group": "Video",
+   "title": "Video je v tvé zemi nebo z tohoto serveru zablokované",
+   "summary": "Autor nebo platforma omezili video na některé státy. Lumen stahuje ze serveru, takže se řídí jeho polohou, ne tvou.",
+   "steps": [
+    "Zkus jiné video nebo stejné video z jiného zdroje.",
+    "Pokud se ti video v prohlížeči přehraje, napiš provozovateli a přilož kód E114."
+   ],
+   "match": [
+    "not available in your country",
+    "blocked it in your country",
+    "geo restricted",
+    "geo-restricted",
+    "available in your location",
+    "not made this video available"
+   ]
+  },
+  {
+   "code": "E115",
+   "group": "Video",
+   "title": "Živé vysílání nebo premiéra",
+   "summary": "Lumen nestahuje vysílání, které právě běží, ani videa, která teprve začnou (premiéry).",
+   "steps": [
+    "Počkej, až vysílání skončí a z přenosu se stane běžné video, a zkus to znovu.",
+    "U premiér počkej, až video začne a bude dostupné."
+   ],
+   "match": [
+    "Živé přenosy",
+    "is live",
+    "live event will begin",
+    "Premieres in",
+    "premiere will begin",
+    "This live event"
+   ]
+  },
+  {
+   "code": "E116",
+   "group": "Video",
+   "title": "Video je příliš dlouhé",
+   "summary": "Server má nastavenou nejdelší povolenou délku videa, aby jedno stahování nezabralo celý server.",
+   "steps": [
+    "Zkus kratší video, nebo stáhni jen část jinde a použij záložku Převod.",
+    "Provozovatel může limit změnit. Napiš mu a přilož kód E116."
+   ],
+   "match": [
+    "je delší než"
+   ],
+   "operator": "Limit nastavuje proměnná MAX_DURATION_MIN v /etc/lumen.env (výchozí 120 minut, 0 = bez limitu)."
+  },
+  {
+   "code": "E117",
+   "group": "Video",
+   "title": "Zvolená kvalita nebo formát není k dispozici",
+   "summary": "Pro tohle video neexistuje přesně ta kvalita nebo formát, které sis vybral.",
+   "steps": [
+    "V Nastavení nastav kvalitu na Nejlepší dostupná a zkus to znovu.",
+    "Zkus režim Auto místo Video nebo Audio.",
+    "Zkus jiný formát (u videa MP4, u zvuku MP3)."
+   ],
+   "match": [
+    "Requested format is not available",
+    "format is not available",
+    "No video formats found"
+   ]
+  },
+  {
+   "code": "E118",
+   "group": "Video",
+   "title": "Obsah je chráněný proti kopírování (DRM)",
+   "summary": "Placené streamovací služby šifrují obsah a Lumen ho nedokáže ani nesmí stáhnout.",
+   "steps": [
+    "Tento obsah stáhnout nejde. Použij volně dostupné video."
+   ],
+   "match": [
+    "\\bDRM\\b"
+   ]
+  },
+  {
+   "code": "E120",
+   "group": "Síť a web",
+   "title": "Web požadavek odmítl (chyba 403)",
+   "summary": "Stránka, ze které video stahuješ, odmítla Lumen pustit dál. Bývá to ochrana proti robotům, která blokuje servery.",
+   "steps": [
+    "Zkus to za chvíli znovu, někdy je blok jen krátký.",
+    "Zkus jiné video z toho webu, nebo stejné video z jiného zdroje.",
+    "Pokud se to děje stále, napiš provozovateli a přilož kód E120. Pomáhá aktualizace Lumenu."
+   ],
+   "match": [
+    "HTTP Error 403",
+    "Forbidden"
+   ],
+   "operator": "Aktualizuj yt-dlp a knihovnu curl-cffi (sudo bash ./update.sh). Lumen u webů mimo YouTube napodobuje prohlížeč (IMPERSONATE=chrome v /etc/lumen.env). Pokud web blokuje adresu serveru, pomůže jen COOKIES_FILE nebo jiný zdroj."
+  },
+  {
+   "code": "E121",
+   "group": "Síť a web",
+   "title": "Web ti dočasně zakázal další požadavky (chyba 429)",
+   "summary": "Stránka dostala od serveru příliš mnoho požadavků a na čas je omezila.",
+   "steps": [
+    "Počkej asi půl hodiny a zkus to znovu.",
+    "Nespouštěj najednou mnoho stahování."
+   ],
+   "match": [
+    "HTTP Error 429",
+    "Too Many Requests",
+    "rate-limited",
+    "rate limited"
+   ]
+  },
+  {
+   "code": "E122",
+   "group": "Síť a web",
+   "title": "Spojení se nepodařilo nebo vypršelo",
+   "summary": "Server se nedokázal včas spojit s webem, nebo se spojení přerušilo.",
+   "steps": [
+    "Zkus to za chvíli znovu.",
+    "Zkontroluj své připojení (Wi-Fi nebo data). Pokud ti nejdou ani jiné stránky, problém je u tebe.",
+    "Pokud se ti ostatní weby načítají a Lumen hlásí chybu stále, napiš provozovateli a přilož kód E122."
+   ],
+   "match": [
+    "timed out",
+    "Connection reset",
+    "Connection refused",
+    "Connection aborted",
+    "Temporary failure",
+    "Network is unreachable",
+    "Name or service not known",
+    "IncompleteRead",
+    "Remote end closed",
+    "Nahrání se nepovedlo",
+    "Failed to fetch",
+    "NetworkError"
+   ],
+   "operator": "Zkontroluj, že server má internet (ping 1.1.1.1) a že běží DNS. Pro YouTube také ověř, že je nainstalované Deno (health: deno true)."
+  },
+  {
+   "code": "E130",
+   "group": "Nastavení",
+   "title": "Server hledá cookies prohlížeče, které nemá",
+   "summary": "V Nastavení máš zapnuté „Přihlášení z prohlížeče“. Server ale žádný prohlížeč nemá, takže cookies nenajde.",
+   "steps": [
+    "Otevři Nastavení → Přihlášení z prohlížeče a vyber Nepoužívat.",
+    "Nastavení je uložené v prohlížeči, takže to udělej na každém zařízení, kde jsi to zapnul.",
+    "Novější verze Lumenu tuhle volbu na serveru ignoruje a schová."
+   ],
+   "match": [
+    "cookies database",
+    "cookiesfrombrowser",
+    "cookies from browser",
+    "could not find .* cookies"
+   ]
+  },
+  {
+   "code": "E140",
+   "group": "Přístup",
+   "title": "Denní limit stažení je vyčerpaný",
+   "summary": "Bez přístupového klíče můžeš za 24 hodin stáhnout omezený počet videí. Stažení, které selže nebo zrušíš, se do limitu nepočítá.",
+   "steps": [
+    "Počkej, až se limit uvolní. Zbývající čas je v hlášce a v Nastavení.",
+    "Bez omezení stahuješ s přístupovým klíčem. V Nastavení → Přístup můžeš o klíč požádat e-mailem.",
+    "Klíč se přiřadí k zařízení, kde ho zadáš jako první."
+   ],
+   "match": [
+    "Denní limit",
+    "limit .* vyčerpan"
+   ]
+  },
+  {
+   "code": "E141",
+   "group": "Přístup",
+   "title": "Klíč patří jinému zařízení",
+   "summary": "Každý klíč funguje jen pro jednu osobu na jednom zařízení, aby kolem nekolovalo. Tenhle je už přiřazený k jinému prohlížeči.",
+   "steps": [
+    "Použij klíč na zařízení, kde jsi ho zadal poprvé.",
+    "Pokud sis změnil telefon nebo prohlížeč, nebo ses odhlásil a smazal data stránek, napiš provozovateli a přilož kód E141. Klíč ti uvolní.",
+    "Klíč nikomu neposílej, přestane fungovat i tobě."
+   ],
+   "match": [
+    "přiřazený k jinému zařízení",
+    "Uložený klíč už neplatí"
+   ],
+   "operator": "Uvolnění: sudo lumenkeys reset <číslo>. Seznam klíčů: sudo lumenkeys list."
+  },
+  {
+   "code": "E142",
+   "group": "Přístup",
+   "title": "Klíč neplatí",
+   "summary": "Zadaný klíč Lumen nezná, nebo byl zrušený.",
+   "steps": [
+    "Zkontroluj, že je klíč opsaný celý a bez překlepu (tvar LMN-XXXXX-XXXXX-XXXXX-XXXXX).",
+    "Pokud jsi ho dostal e-mailem, zkopíruj ho přímo z e-mailu.",
+    "Pokud to nepomůže, napiš provozovateli a přilož kód E142."
+   ],
+   "match": [
+    "Tenhle klíč neplatí",
+    "klíč neplatí"
+   ]
+  },
+  {
+   "code": "E150",
+   "group": "Přístup",
+   "title": "Moc pokusů za sebou",
+   "summary": "Aby se server nezahltil, je omezený počet akcí za hodinu (načtení odkazů, zadání klíče, žádost o klíč).",
+   "steps": [
+    "Počkej chvíli, u klíče a žádostí až hodinu, a zkus to znovu.",
+    "Nevkládej odkazy opakovaně, jedna žádost stačí."
+   ],
+   "match": [
+    "Moc pokusů",
+    "Moc rychle za sebou",
+    "Dnes jsi už žádal",
+    "Dnes už přišlo hodně žádostí"
+   ]
+  },
+  {
+   "code": "E151",
+   "group": "Server",
+   "title": "Server je vytížený nebo máš rozdělané víc úloh",
+   "summary": "Na serveru běží nejvýš pár stahování najednou a každý návštěvník smí mít jen omezený počet rozdělaných úloh.",
+   "steps": [
+    "Počkej, až některá z tvých úloh doběhne, nebo ji zruš.",
+    "Pokud je server plně vytížený, zkus to za několik minut."
+   ],
+   "match": [
+    "plně vytížený",
+    "rozdělaných nejvýš"
+   ]
+  },
+  {
+   "code": "E160",
+   "group": "Server",
+   "title": "Na serveru došlo místo",
+   "summary": "Disk na serveru je plný, takže se video nemůže uložit.",
+   "steps": [
+    "Zkus to později. Hotové soubory se po 24 hodinách mažou a místo se uvolní.",
+    "Pokud se to opakuje, napiš provozovateli a přilož kód E160."
+   ],
+   "match": [
+    "No space left",
+    "Errno 28",
+    "disk quota"
+   ],
+   "operator": "Zkontroluj df -h /srv/lumen-downloads. Zkrať KEEP_HOURS v /etc/lumen.env nebo zvětši obraz disku."
+  },
+  {
+   "code": "E161",
+   "group": "Server",
+   "title": "Na serveru chybí ffmpeg",
+   "summary": "Pro spojení videa se zvukem a převod formátů server potřebuje program ffmpeg a ten mu chybí.",
+   "steps": [
+    "Tohle uživatel nespraví. Napiš provozovateli a přilož kód E161."
+   ],
+   "match": [
+    "ffmpeg is not installed",
+    "ffmpeg not found",
+    "ffprobe",
+    "chybí ffmpeg",
+    "Na serveru chybí ffmpeg"
+   ],
+   "operator": "sudo apt install ffmpeg, pak sudo systemctl restart lumen."
+  },
+  {
+   "code": "E170",
+   "group": "Soubory",
+   "title": "Soubor už není k dispozici",
+   "summary": "Hotové soubory se z úsporných důvodů po čase (výchozí 24 hodin) mažou, nebo je odstranil někdo jiný ze svého zařízení.",
+   "steps": [
+    "Stáhni video znovu.",
+    "Soubor si ulož hned po dokončení. V Nastavení můžeš zapnout automatické ukládání."
+   ],
+   "match": [
+    "Soubor už není k dispozici",
+    "Úloha neexistuje"
+   ]
+  },
+  {
+   "code": "E171",
+   "group": "Soubory",
+   "title": "Nahraný soubor je příliš velký",
+   "summary": "V záložce Převod je omezená velikost nahrávaného souboru.",
+   "steps": [
+    "Zkus menší soubor, nebo ho nejdřív zkrať."
+   ],
+   "match": [
+    "Soubor je větší než"
+   ],
+   "operator": "Limit nastavuje MAX_UPLOAD_MB v /etc/lumen.env."
+  },
+  {
+   "code": "E172",
+   "group": "Soubory",
+   "title": "Náhled se nepodařilo přehrát",
+   "summary": "Video nejde přehrát přímo na stránce, ale stáhnout se může.",
+   "steps": [
+    "Použij místo náhledu Stáhnout.",
+    "Pokud nejde ani stažení, zkus ostatní kódy chyb podle zobrazeného textu."
+   ],
+   "match": [
+    "Náhled se nepodařilo",
+    "jako náhled",
+    "Video se nepodařilo načíst",
+    "Tenhle formát prohlížeč nepřehraje"
+   ]
+  },
+  {
+   "code": "E999",
+   "group": "Ostatní",
+   "title": "Neznámá chyba",
+   "summary": "Tahle chyba není v nápovědě popsaná.",
+   "steps": [
+    "Zkus to znovu za chvíli.",
+    "Zkus jiný odkaz nebo jiné video.",
+    "Pokud se to opakuje, napiš provozovateli Lumenu a přilož kód chyby E999 a text chyby, který vidíš (na stránce nápovědy se zobrazí nahoře)."
+   ],
+   "match": []
+  }
+ ]
+}
