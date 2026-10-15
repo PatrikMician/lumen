@@ -175,7 +175,23 @@
   }
 
   audio.addEventListener("ended", () => next(true));
-  audio.addEventListener("playing", () => { errorsInRow = 0; renderPlayState(); });
+  audio.addEventListener("playing", () => { errorsInRow = 0; setLoading(false); renderPlayState(); prefetchNext(); });
+  // server může skladbu nejdřív stahovat (pár sekund), tlačítko přehrát mezitím ukazuje načítání
+  audio.addEventListener("loadstart", () => setLoading(true));
+  ["canplay", "error", "emptied", "pause"].forEach((ev) => audio.addEventListener(ev, () => setLoading(false)));
+  function setLoading(on) { $("#mPlay").classList.toggle("loading", on && !!audio.getAttribute("src")); }
+
+  /* Další online skladbu ve frontě si server připraví předem, ať po dohrání naváže hned */
+  const prefetched = new Set();
+  function prefetchNext() {
+    const n = queue[index + 1];
+    if (!n || n.src !== "online" || prefetched.has(n.id)) return;
+    prefetched.add(n.id);
+    setTimeout(() => {
+      fetch("/api/music/stream/" + encodeURIComponent(n.id), { headers: { Range: "bytes=0-1" } })
+        .then((r) => r.body && r.body.cancel()).catch(() => prefetched.delete(n.id));
+    }, 4000);
+  }
   audio.addEventListener("pause", renderPlayState);
   audio.addEventListener("play", renderPlayState);
   audio.addEventListener("timeupdate", renderTime);

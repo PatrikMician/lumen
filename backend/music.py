@@ -14,11 +14,15 @@ import os
 import re
 import threading
 import time
+from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse, StreamingResponse
+
+from . import quota
 
 MUSIC_ENABLED = os.getenv("MUSIC", "1") == "1"
 MUSIC_REQUIRE_KEY = os.getenv("MUSIC_REQUIRE_KEY", "1") == "1"
@@ -456,9 +460,6 @@ _streams: dict = {}
 _streams_lock = threading.Lock()
 
 
-_prefer_ipv4 = False  # po prvním úspěchu přes IPv4 (a neúspěchu výchozí sítě) rovnou přes IPv4
-
-
 def resolve_stream(video_id: str, ipv4: bool = False) -> dict:
     now = time.time()
     with _streams_lock:
@@ -503,32 +504,165 @@ def resolve_stream(video_id: str, ipv4: bool = False) -> dict:
     return info
 
 
+# --------------------------------------------------------------------------
+# Záloha: stažení skladby přes yt-dlp do mezipaměti na disku
+# --------------------------------------------------------------------------
+# Na serveru googlevideo pustí přímé čtení samotné zvukové stopy jen na začátek a pak vrací 403
+# (ověřeno na mican-server 2026-10-15, IP i síť nehrály roli), stahování přes yt-dlp ale funguje.
+# Skladba se proto stáhne celá (jako běžné stažení v Lumenu) a pošle se ze souboru i s přetáčením.
+CACHE_DIR = Path(os.getenv("MUSIC_CACHE_DIR", "") or quota.DATA_DIR / "music-cache")
+CACHE_MB = int(os.getenv("MUSIC_CACHE_MB", "1024"))
+CACHE_TYPES = {".m4a": "audio/mp4", ".mp4": "audio/mp4", ".webm": "audio/webm", ".opus": "audio/ogg", ".mp3": "audio/mpeg"}
+_use_download = os.getenv("MUSIC_DIRECT", "1") != "1"  # po prvním 403 rovnou přes mezipaměť
+_dl_locks: dict = {}
+_dl_locks_guard = threading.Lock()
+
+
+def cached_file(video_id: str) -> Optional[Path]:
+    for f in CACHE_DIR.glob(f"{video_id}.*"):
+        if f.suffix.lower() in CACHE_TYPES and f.stat().st_size > 0:
+            return f
+    return None
+
+
+def prune_cache():
+    files = sorted((f for f in CACHE_DIR.glob("*") if f.is_file()), key=lambda f: f.stat().st_mtime)
+    total = sum(f.stat().st_size for f in files)
+    while files and total > CACHE_MB * 1024 * 1024:
+        f = files.pop(0)
+        total -= f.stat().st_size
+        f.unlink(missing_ok=True)
+
+
+_downloads: dict = {}  # video_id -> {"done": Event, "error": str | None, "started": float}
+
+
+def _download_worker(video_id: str, state: dict):
+    last_error = "zvuk se nenašel"
+    for url in (f"https://music.youtube.com/watch?v={video_id}", f"https://www.youtube.com/watch?v={video_id}"):
+        opts = _deps["base_opts"](url=url)
+        # fixup=never: soubor zůstane bajt po bajtu stejný jako během stahování, takže se dá přehrávat
+        # už rozstahovaný (.part) a pak dál z hotového souboru se stejnými pozicemi
+        opts.update(format=AUDIO_FORMAT, outtmpl=str(CACHE_DIR / f"{video_id}.%(ext)s"), noprogress=True,
+                    fixup="never", nopart=False)
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.extract_info(url, download=True)
+        except Exception as e:  # noqa: BLE001
+            last_error = _deps["friendly"](e)
+            print(f"Hudba: stažení {video_id} z {url.split('/')[2]} selhalo: {last_error}", flush=True)
+            for f in CACHE_DIR.glob(f"{video_id}.*"):
+                f.unlink(missing_ok=True)
+            continue
+        hit = cached_file(video_id)
+        if hit:
+            print(f"Hudba: {video_id} stažena do mezipaměti za {time.time() - state['started']:.1f} s "
+                  f"({hit.stat().st_size // 1024} kB)", flush=True)
+            prune_cache()
+            state["done"].set()
+            return
+    state["error"] = last_error
+    state["done"].set()
+
+
+def start_download(video_id: str) -> dict:
+    """Spustí stažení na pozadí (jen jednou pro skladbu) a vrátí jeho stav."""
+    with _dl_locks_guard:
+        state = _downloads.get(video_id)
+        if state and not (state["done"].is_set() and (state["error"] or not cached_file(video_id))):
+            return state
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        state = {"done": threading.Event(), "error": None, "started": time.time()}
+        _downloads[video_id] = state
+    threading.Thread(target=_download_worker, args=(video_id, state), daemon=True).start()
+    return state
+
+
+def _part_file(video_id: str) -> Optional[Path]:
+    for f in CACHE_DIR.glob(f"{video_id}.*.part"):
+        return f
+    return None
+
+
+def follow_download(video_id: str, state: dict):
+    """Posílá rozstahovaný soubor, jak roste, až do konce stahování (prohlížeč hraje hned)."""
+    pos, idle = 0, 0.0
+    while True:
+        path = cached_file(video_id) or _part_file(video_id)
+        chunk = b""
+        if path:
+            try:
+                with open(path, "rb") as f:  # otevírá se pokaždé znovu: yt-dlp soubor na konci přejmenuje
+                    f.seek(pos)
+                    chunk = f.read(256 * 1024)
+            except OSError:
+                chunk = b""
+        if chunk:
+            pos += len(chunk)
+            idle = 0.0
+            yield chunk
+            continue
+        final = cached_file(video_id)
+        if state["done"].is_set() and (not final or pos >= final.stat().st_size):
+            return
+        idle += 0.2
+        if idle > 60:
+            return
+        time.sleep(0.2)
+
+
+def serve_cached(path: Path) -> FileResponse:
+    path.touch()  # mezipaměť maže nejdéle nehrané
+    return FileResponse(path, media_type=CACHE_TYPES.get(path.suffix.lower(), "audio/mp4"),
+                        headers={"Cache-Control": "private, max-age=3600"})
+
+
 @router.get("/api/music/stream/{video_id}")
 def music_stream(request: Request, video_id: str):
-    global _prefer_ipv4
+    global _use_download
     check_id(video_id)
     rng = request.headers.get("range")
     # do limitu se počítá spuštění skladby, ne každý kousek, o který si přehrávač řekne při přetáčení
     need_online(request, "music_track" if not rng or rng.strip() in ("bytes=0-", "bytes=0-1") else "music")
-    last = None
-    # 1) výchozí síť, 2) celé znovu přes IPv4: odkaz googlevideo je vázaný na IP, ze které ho yt-dlp
-    #    získal, a když server zjišťuje přes IPv6 a stahuje přes IPv4 (nebo naopak), vrací se 403
-    for ipv4 in ((True,) if _prefer_ipv4 else (False, True)):
-        info = resolve_stream(video_id, ipv4)
+    hit = cached_file(video_id)
+    if hit:
+        return serve_cached(hit)
+    if not _use_download:
+        info = resolve_stream(video_id)
         try:
             ydl, upstream = _deps["open_media"](info, rng)
+            return _deps["stream_media"](ydl, upstream, info["type"], {"Cache-Control": "private, max-age=3600"})
         except Exception as e:  # noqa: BLE001
             with _streams_lock:
                 _streams.pop(video_id, None)
-            last = _deps["media_status"](e)
-            if last == 416:
+            status = _deps["media_status"](e)
+            if status == 416:
                 raise HTTPException(416, "Mimo rozsah skladby.")
-            print(f"Hudba: stream {video_id} vrátil {last or type(e).__name__ + ': ' + str(e)[:120]} "
-                  f"({'IPv4' if ipv4 else 'výchozí síť'}, ip={_deps['media_ip'](info['url'])})", flush=True)
-            continue
-        if ipv4 and not _prefer_ipv4:
-            _prefer_ipv4 = True
-            print(f"Hudba: přes IPv4 prošlo (ip={_deps['media_ip'](info['url'])}), další skladby rovnou přes IPv4", flush=True)
-        return _deps["stream_media"](ydl, upstream, info["type"], {"Cache-Control": "private, max-age=3600"})
-    raise HTTPException(_deps["upstream_error"], f"Skladbu se nepodařilo načíst (HTTP Error {last})." if last
-                        else "Skladbu se nepodařilo načíst.")
+            _use_download = True
+            print(f"Hudba: přímé čtení {video_id} vrátilo {status or type(e).__name__} "
+                  f"(ip={_deps['media_ip'](info['url'])}), dál přes stažení do mezipaměti", flush=True)
+    state = start_download(video_id)
+    # počkat na začátek souboru (nebo na konec stažení / chybu), pak hned posílat
+    deadline = time.time() + 45
+    while time.time() < deadline and not state["done"].is_set():
+        part = _part_file(video_id)
+        if part and part.stat().st_size >= 64 * 1024:
+            break
+        time.sleep(0.2)
+    if state["error"]:
+        raise HTTPException(422, "Skladbu se nepodařilo přehrát: " + state["error"])
+    hit = cached_file(video_id)
+    if hit:
+        return serve_cached(hit)
+    start = re.fullmatch(r"\s*bytes=(\d+)-\d*\s*", rng or "")
+    if start and int(start.group(1)) > 0:
+        # přetáčení během stahování: počká se na celý soubor
+        state["done"].wait(120)
+        hit = cached_file(video_id)
+        if not hit:
+            raise HTTPException(422, "Skladbu se nepodařilo přehrát: " + (state["error"] or "stažení nedoběhlo"))
+        return serve_cached(hit)
+    if not _part_file(video_id) and not state["done"].is_set():
+        raise HTTPException(_deps["upstream_error"], "Skladbu se nepodařilo načíst: stahování se nerozběhlo.")
+    return StreamingResponse(follow_download(video_id, state), media_type="audio/mp4",
+                             headers={"Cache-Control": "no-store"})

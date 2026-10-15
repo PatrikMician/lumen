@@ -513,6 +513,8 @@ main:has(.music-view.active) { align-content: start; padding-top: 40px; grid-tem
 .m-play { display: grid; place-items: center; width: 46px; height: 46px; border: 0; border-radius: 50%; background: var(--text); color: var(--bg); margin: 0 4px; }
 .m-play .ico { width: 24px; height: 24px; }
 .m-play:hover { transform: scale(1.04); }
+.m-play.loading { animation: m-pulse 1s ease-in-out infinite alternate; }
+@keyframes m-pulse { from { opacity: 1; } to { opacity: .45; } }
 .m-toggle { position: relative; }
 .m-toggle.on { color: var(--accent); }
 .m-toggle.on::after { content: ""; position: absolute; bottom: 4px; left: 50%; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--accent); }

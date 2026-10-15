@@ -79,6 +79,9 @@ Důležité: **aplikace je bez hesla otevřená komukoliv, kdo zná adresu.** Na
 | `MUSIC_LOCATION` | `CZ` | Země pro hudební katalog (domovská stránka, žebříčky). |
 | `MUSIC_BROWSE_PER_HOUR` | `300` | Dotazů do hudebního katalogu na prohlížeč za hodinu. |
 | `MUSIC_TRACKS_PER_HOUR` | `120` | Spuštěných skladeb na prohlížeč za hodinu. |
+| `MUSIC_DIRECT` | `1` | `1` = nejdřív zkusit přímé čtení zvuku z YouTube, při 403 přejít na stažení do mezipaměti; `0` = rovnou přes mezipaměť. |
+| `MUSIC_CACHE_DIR` | `DATA_DIR/music-cache` | Mezipaměť stažených skladeb. |
+| `MUSIC_CACHE_MB` | `1024` | Největší velikost mezipaměti, nejdéle nehrané skladby se mažou. |
 
 ### Varianta A: Docker
 ```
@@ -154,6 +157,8 @@ Záložka **Hudba** má tři části:
 - **Playlisty**: vlastní playlisty uložené v prohlížeči (localStorage). Skladba se přidá tlačítkem **Do playlistu**, celé album nebo playlist tlačítkem **Uložit jako playlist**, frontu v panelu fronty. Playlist jde přejmenovat, smazat a měnit v něm pořadí. Může mít online skladby i skladby ze zařízení; ty se přehrají, až je otevřená jejich složka.
 
 Když skladba nejde přehrát, přehrávač se serveru zeptá na důvod a ukáže ho i s kódem nápovědy (třeba E110 při omezení IP). Server zkouší zvuk nejdřív přes YouTube Music (m4a), pak přes obyčejný YouTube, a každé selhání zapíše do logu (`journalctl -u lumen | grep Hudba`).
+
+**Mezipaměť:** na mican-serveru googlevideo pustí přímé čtení samotné zvukové stopy jen na začátek a pak vrací 403 (náhled videa s kombinovaným formátem funguje, ověřeno 2026-10-15). Po prvním takovém 403 proto server skladby stahuje přes yt-dlp (stejně jako běžné stažení) do `MUSIC_CACHE_DIR` a posílá je prohlížeči už během stahování, takže hrají po pár sekundách; přetáčení na místo, které ještě není stažené, počká na konec stažení. Opakované přehrání jde rovnou z disku a přehrávač si během hraní nechá připravit další skladbu ve frontě. Stahuje se bez úpravy kontejneru (`fixup=never`), aby byly bajty během stahování i potom stejné.
 
 Přehrávač má frontu, náhodné pořadí, opakování (vše / jedna skladba), hlasitost a ovládání ze zamčené obrazovky a mediálních kláves (Media Session). Online hudba zatěžuje server i síť a zvyšuje riziko, že YouTube IP serveru dočasně omezí (chyba E110), proto jsou na ni limity `MUSIC_BROWSE_PER_HOUR` a `MUSIC_TRACKS_PER_HOUR`.
 
