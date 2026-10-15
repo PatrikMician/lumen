@@ -16,7 +16,7 @@
       document.documentElement.dataset.accent = s.accent || "amber";
     } catch (e) {}
   </script>
-  <link rel="stylesheet" href="/style.css?v=10">
+  <link rel="stylesheet" href="/style.css?v=11">
 </head>
 <body>
 
@@ -107,6 +107,7 @@
       <div class="seg" role="radiogroup" aria-label="Odkud hudba hraje">
         <label><input type="radio" name="msrc" value="online"><span>Online</span></label>
         <label><input type="radio" name="msrc" value="local"><span>V zařízení</span></label>
+        <label><input type="radio" name="msrc" value="mine"><span>Playlisty</span></label>
       </div>
     </div>
 
@@ -150,6 +151,10 @@
         <button type="button" id="mLocalClear" class="link">Vyprázdnit seznam</button>
       </div>
       <ul id="mLocalList" class="m-tracks"></ul>
+    </div>
+
+    <div id="mMine" hidden>
+      <div id="mMineContent"></div>
     </div>
   </section>
 
@@ -352,8 +357,25 @@
     <label class="switch"><input type="checkbox" id="mAutomix" aria-label="Automix"><i></i></label>
   </div>
   <ul id="mQueueList" class="m-tracks m-queue-list"></ul>
-  <footer><button type="button" id="mQueueClear" class="link">Vyprázdnit frontu</button></footer>
+  <footer class="m-queue-foot">
+    <button type="button" id="mQueueSave" class="link">Uložit jako playlist</button>
+    <button type="button" id="mQueueClear" class="link">Vyprázdnit frontu</button>
+  </footer>
 </aside>
+
+<dialog id="mPick" class="player m-pick" aria-labelledby="mPickTitle">
+  <header>
+    <span id="mPickTitle" class="player-title">Přidat do playlistu</span>
+    <button type="button" id="mPickClose" class="icon-btn" aria-label="Zavřít"><svg class="ico"><use href="#i-x"/></svg></button>
+  </header>
+  <div class="m-pick-body">
+    <ul id="mPickList" class="m-pick-list"></ul>
+    <form id="mPickForm" class="m-pick-form" autocomplete="off">
+      <input id="mPickName" class="plain-input" type="text" maxlength="80" placeholder="Název nového playlistu" aria-label="Název nového playlistu">
+      <button type="submit" class="btn primary">Vytvořit a přidat</button>
+    </form>
+  </div>
+</dialog>
 
 <dialog id="mLyrics" class="player m-lyrics" aria-label="Text písně">
   <header>
@@ -369,6 +391,6 @@
 
 <script src="/help.js?v=1" defer></script>
 <script src="/app.js?v=7" defer></script>
-<script src="/music.js?v=2" defer></script>
+<script src="/music.js?v=5" defer></script>
 </body>
 </html>

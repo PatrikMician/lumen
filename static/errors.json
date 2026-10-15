@@ -490,6 +490,7 @@
    "title": "Skladbu se nepodařilo přehrát",
    "summary": "Server ke skladbě nezískal zvuk. Skladba může být v Česku nedostupná, jen pro předplatitele, nebo server dočasně omezuje YouTube.",
    "steps": [
+    "Když se nic nestane hned po klepnutí, klepni ještě jednou na tlačítko přehrát v liště dole (Safari na iPhonu pouští zvuk jen přímo po klepnutí).",
     "Zkus jinou verzi skladby (třeba z alba místo videoklipu).",
     "Pokud nejde žádná skladba, server je nejspíš dočasně omezený (viz E110). Zkus to později.",
     "Přetáčení a pauza fungují jen u skladby, která se už začala přehrávat."
@@ -497,7 +498,9 @@
    "match": [
     "Skladbu se nepodařilo",
     "Mimo rozsah skladby",
-    "Ke skladbě se nic nenašlo"
+    "Ke skladbě se nic nenašlo",
+    "Prohlížeč zvuk sám nespustil",
+    "Prohlížeč nepřehraje formát skladby"
    ]
   },
   {
@@ -507,11 +510,13 @@
    "summary": "Soubor ze zařízení je ve formátu, který tvůj prohlížeč neumí (typicky FLAC nebo Opus v Safari na iPhonu), nebo je poškozený.",
    "steps": [
     "Zkus jiný prohlížeč (Chrome, Edge a Firefox umí nejvíc formátů).",
-    "Převeď soubor na MP3 nebo M4A v záložce Převod."
+    "Převeď soubor na MP3 nebo M4A v záložce Převod.",
+    "Skladby ze zařízení v playlistu se přehrají, až v záložce V zařízení otevřeš složku, kde leží."
    ],
    "match": [
     "Prohlížeč nepřehraje tenhle soubor",
-    "Soubor už není dostupný"
+    "Soubor už není dostupný",
+    "Soubor není načtený"
    ]
   },
   {
@@ -528,6 +533,20 @@
    "match": [
     "Přístup ke složce se nepodařil",
     "Ve složce jsem nenašel žádnou hudbu"
+   ]
+  },
+  {
+   "code": "E185",
+   "group": "Hudba",
+   "title": "Playlist se nepodařilo uložit",
+   "summary": "Playlisty se ukládají v úložišti prohlížeče. To je vypnuté (soukromé okno), nebo plné.",
+   "steps": [
+    "Neotvírej Lumen v anonymním / soukromém okně, tam se nic neukládá natrvalo.",
+    "Smaž playlisty, které nepotřebuješ, nebo z nich odeber skladby.",
+    "V nastavení prohlížeče povol pro Lumen ukládání dat (cookies a data webu)."
+   ],
+   "match": [
+    "Playlist se nepodařilo uložit"
    ]
   },
   {

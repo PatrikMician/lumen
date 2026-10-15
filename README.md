@@ -147,10 +147,13 @@ Pozor: s nastaveným `AUTH_PASSWORD` si web zamkne heslem úplně celý (i náv�
 
 ### Hudba
 
-Záložka **Hudba** má dva zdroje:
+Záložka **Hudba** má tři části:
 
-- **Online**: domovská stránka (rychlý výběr, hity, novinky), hledání skladeb, alb, interpretů, playlistů a videí, stránky alb, interpretů a playlistů, rádio interpreta, text písně a **Automix** (když fronta dohraje, přidá podobné skladby). Do hledání jde vložit i odkaz z YouTube Music nebo YouTube. Katalog čte knihovna `ytmusicapi` bez přihlášení, zvuk vybírá yt-dlp (m4a, hraje i Safari) a server ho proudem přeposílá jako náhled videa. Každou skladbu jde **stáhnout** jako zvuk (počítá se jako běžné stažení). Ve výchozím stavu je online hudba jen pro návštěvníky s přístupovým klíčem (`MUSIC_REQUIRE_KEY`), aby starý server nezahltil kdokoliv z internetu.
+- **Online**: domovská stránka (rychlý výběr, hity, novinky), **žánry a nálady** (Rock, Pop, Hip-hop, Klasická… a Pohoda, Párty, Cvičení…, klik otevře playlisty žánru), hledání skladeb, alb, interpretů, playlistů a videí, stránky alb, interpretů a playlistů, rádio interpreta, text písně a **Automix** (když fronta dohraje, přidá podobné skladby). Do hledání jde vložit i odkaz z YouTube Music nebo YouTube. Katalog čte knihovna `ytmusicapi` bez přihlášení, zvuk vybírá yt-dlp (m4a, hraje i Safari) a server ho proudem přeposílá jako náhled videa. Každou skladbu jde **stáhnout** jako zvuk (počítá se jako běžné stažení). Ve výchozím stavu je online hudba jen pro návštěvníky s přístupovým klíčem (`MUSIC_REQUIRE_KEY`), aby starý server nezahltil kdokoliv z internetu.
 - **V zařízení**: návštěvník vybere složku s hudbou (Chrome a Edge si ji zapamatují, po restartu prohlížeče stačí potvrdit **Znovu otevřít**) nebo přidá soubory. Soubory se nikam neposílají, hrají přímo z jeho disku, takže funguje i bez klíče. U souborů stažených Lumenem se z názvu odřízne `[id]` a „Interpret - Název“ se rozdělí.
+- **Playlisty**: vlastní playlisty uložené v prohlížeči (localStorage). Skladba se přidá tlačítkem **Do playlistu**, celé album nebo playlist tlačítkem **Uložit jako playlist**, frontu v panelu fronty. Playlist jde přejmenovat, smazat a měnit v něm pořadí. Může mít online skladby i skladby ze zařízení; ty se přehrají, až je otevřená jejich složka.
+
+Když skladba nejde přehrát, přehrávač se serveru zeptá na důvod a ukáže ho i s kódem nápovědy (třeba E110 při omezení IP). Server zkouší zvuk nejdřív přes YouTube Music (m4a), pak přes obyčejný YouTube, a každé selhání zapíše do logu (`journalctl -u lumen | grep Hudba`).
 
 Přehrávač má frontu, náhodné pořadí, opakování (vše / jedna skladba), hlasitost a ovládání ze zamčené obrazovky a mediálních kláves (Media Session). Online hudba zatěžuje server i síť a zvyšuje riziko, že YouTube IP serveru dočasně omezí (chyba E110), proto jsou na ni limity `MUSIC_BROWSE_PER_HOUR` a `MUSIC_TRACKS_PER_HOUR`.
 

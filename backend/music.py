@@ -369,6 +369,86 @@ def music_lyrics(request: Request, browse_id: str):
     return cached(("lyrics", browse_id), load)
 
 
+GENRE_NAMES = {
+    # nálady a chvíle
+    "chill": "Pohoda", "christmas": "Vánoce", "commute": "Na cestu", "energize": "Energie", "feel good": "Dobrá nálada",
+    "focus": "Soustředění", "gaming": "Hraní", "party": "Párty", "romance": "Romantika", "sad": "Smutné",
+    "sleep": "Spánek", "workout": "Cvičení",
+    # žánry
+    "african": "Africká", "arabic": "Arabská", "autumn": "Podzim", "classical": "Klasická", "country & americana": "Country",
+    "dance & electronic": "Dance a elektronika", "decades": "Desetiletí", "family": "Pro rodinu",
+    "folk & acoustic": "Folk a akustická", "indie & alternative": "Indie a alternativa", "jazz": "Jazz",
+    "latin": "Latino", "metal": "Metal", "pop": "Pop", "r&b & soul": "R&B a soul", "reggae & caribbean": "Reggae",
+    "rock": "Rock", "soundtracks & musicals": "Soundtracky a muzikály", "korean hip-hop": "Korejský hip-hop",
+    "mandopop & cantopop": "Mandopop a cantopop", "hip-hop": "Hip-hop", "blues": "Blues",
+    "bollywood & indian": "Bollywood a indická",
+}
+GENRE_SECTIONS = {"genres": "Žánry", "moods & moments": "Nálady a chvíle"}
+PARAMS_RE = re.compile(r"[\w=-]{6,200}")
+
+
+@router.get("/api/music/genres")
+def music_genres(request: Request):
+    """Žánry a nálady z katalogu; každá položka nese `params` pro /api/music/genre."""
+    need_online(request)
+
+    def load(y):
+        sections = []
+        for title, items in y.get_mood_categories().items():
+            entries = [{"title": GENRE_NAMES.get(i["title"].lower(), i["title"]), "params": i["params"]}
+                       for i in items if i.get("params") and i.get("title")]
+            if entries:
+                sections.append({"title": GENRE_SECTIONS.get(title.lower(), title), "items": entries})
+        sections.sort(key=lambda s: s["title"] != "Žánry")  # žánry první
+        return {"sections": sections}
+
+    return cached(("genres",), load)
+
+
+def _mood_playlists(y, params: str) -> list:
+    """Playlisty žánru. ytmusicapi.get_mood_playlists spadne na jediné položce bez odkazu (třeba
+    u žánru Rock, ověřeno s 1.12.3), proto se odpověď projde sama a takové položky se přeskočí."""
+    try:
+        return y.get_mood_playlists(params)
+    except Exception:  # noqa: BLE001
+        pass
+    response = y._send_request("browse", {"browseId": "FEmusic_moods_and_genres_category", "params": params})
+    found, seen = [], set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            item = node.get("musicTwoRowItemRenderer")
+            if item:
+                runs = (item.get("title") or {}).get("runs") or [{}]
+                endpoint = (item.get("navigationEndpoint") or runs[0].get("navigationEndpoint") or {}).get("browseEndpoint") or {}
+                bid = endpoint.get("browseId", "")
+                if bid and bid not in seen and runs[0].get("text"):
+                    seen.add(bid)
+                    thumbs = (((item.get("thumbnailRenderer") or {}).get("musicThumbnailRenderer") or {})
+                              .get("thumbnail") or {}).get("thumbnails") or []
+                    sub = "".join(r.get("text", "") for r in (item.get("subtitle") or {}).get("runs") or [])
+                    found.append({"title": runs[0]["text"], "playlistId": bid[2:] if bid.startswith("VL") else bid,
+                                  "thumbnails": thumbs, "description": sub})
+                return
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(response)
+    return found
+
+
+@router.get("/api/music/genre")
+def music_genre(request: Request, params: str):
+    """Playlisty jednoho žánru nebo nálady."""
+    need_online(request)
+    if not PARAMS_RE.fullmatch(params or ""):
+        raise HTTPException(400, "Neplatný odkaz na hudbu.")
+    return cached(("genre", params), lambda y: {"items": cards(_mood_playlists(y, params))[:80]})
+
+
 # --------------------------------------------------------------------------
 # Přehrávání zvuku
 # --------------------------------------------------------------------------
@@ -384,20 +464,28 @@ def resolve_stream(video_id: str) -> dict:
         hit = _streams.get(video_id)
     if hit:
         return hit
-    url = f"https://music.youtube.com/watch?v={video_id}"
-    opts = _deps["base_opts"](url=url)
-    opts.update(skip_download=True, format=AUDIO_FORMAT)
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            data = ydl.extract_info(url, download=False)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(422, "Skladbu se nepodařilo přehrát: " + _deps["friendly"](e))
-    if not data or data.get("is_live"):
-        raise HTTPException(422, "Skladbu se nepodařilo přehrát.")
-    media = data.get("url")
-    host = urlparse(media).hostname if media else None
-    if not media or not host or not _deps["is_public_host"](host):
-        raise HTTPException(422, "Skladbu se nepodařilo přehrát.")
+    data, media, last_error = None, None, "zvuk se nenašel"
+    # 1) YouTube Music s m4a (hraje všude), 2) obyčejný YouTube s jakýmkoliv zvukem, kdyby Music
+    # klient na serveru formáty nevrátil (třeba kvůli omezení IP nebo změně na straně YouTube)
+    for url, fmt in ((f"https://music.youtube.com/watch?v={video_id}", AUDIO_FORMAT),
+                     (f"https://www.youtube.com/watch?v={video_id}", AUDIO_FORMAT + "/best")):
+        opts = _deps["base_opts"](url=url)
+        opts.update(skip_download=True, format=fmt)
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                data = ydl.extract_info(url, download=False)
+        except Exception as e:  # noqa: BLE001
+            last_error = _deps["friendly"](e)
+            print(f"Hudba: stream {video_id} z {url.split('/')[2]} selhal: {last_error}", flush=True)
+            continue
+        media = (data or {}).get("url")
+        host = urlparse(media).hostname if media else None
+        if data and not data.get("is_live") and media and host and _deps["is_public_host"](host):
+            break
+        media = None
+        last_error = "zvuk se nenašel"
+    if not media:
+        raise HTTPException(422, "Skladbu se nepodařilo přehrát: " + last_error)
     try:
         expire = int(parse_qs(urlparse(media).query).get("expire", ["0"])[0])
     except ValueError:
@@ -434,13 +522,15 @@ def music_stream(request: Request, video_id: str):
                 _streams.pop(video_id, None)  # odkaz mohl vypršet, zkusíme ho jednou získat znovu
             if e.code == 416:
                 raise HTTPException(416, "Mimo rozsah skladby.")
+            print(f"Hudba: stream {video_id} vrátil HTTP {e.code} (pokus {attempt})", flush=True)
             if attempt == 2:
-                raise HTTPException(502, "Skladbu se nepodařilo načíst.")
-        except Exception:  # noqa: BLE001
+                raise HTTPException(502, f"Skladbu se nepodařilo načíst (HTTP Error {e.code}).")
+        except Exception as e:  # noqa: BLE001
             with _streams_lock:
                 _streams.pop(video_id, None)
+            print(f"Hudba: stream {video_id} selhal: {type(e).__name__}: {e} (pokus {attempt})", flush=True)
             if attempt == 2:
-                raise HTTPException(502, "Skladbu se nepodařilo načíst.")
+                raise HTTPException(502, "Skladbu se nepodařilo načíst: " + _deps["friendly"](e))
     out_headers = {"Accept-Ranges": "bytes", "Cache-Control": "private, max-age=3600"}
     for h in ("Content-Length", "Content-Range"):
         if upstream.headers.get(h):
