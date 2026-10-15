@@ -98,6 +98,7 @@ a { color: inherit; }
   backdrop-filter: blur(12px);
 }
 .brand {
+  display: flex; align-items: center; gap: 8px;
   font: 500 30px/1 var(--font-display);
   letter-spacing: -.03em;
   text-decoration: none;
@@ -140,6 +141,7 @@ main > * { width: 100%; max-width: 640px; }
 
 /* ---------- Stahování ---------- */
 .wordmark {
+  display: flex; align-items: center; justify-content: center; gap: .08em;
   font: 500 clamp(64px, 13vw, 104px)/1 var(--font-display);
   letter-spacing: -.04em;
   text-align: center;
@@ -387,6 +389,9 @@ select:disabled { opacity: .5; }
 @media (max-width: 700px) {
   .key-form { max-width: none; width: 100%; justify-content: flex-start; flex-basis: auto; }
 }
+
+/* Logo vedle nápisu lumen na úvodní stránce */
+.wordmark-logo { width: 1.15em; height: 1.15em; margin-left: -.15em; flex: none; }
 
 /* Lumen pro Windows ke stažení */
 .app-card {

@@ -30,14 +30,63 @@ def pkg_dir(name: str) -> Path:
     return Path(spec.origin).parent
 
 
-def make_icon() -> Path:
+def draw_logo(size: int = 256):
+    """Kompaktní logo (static/logo-small.svg) nakreslené v Pillow: 4× větší a zmenšené, ať jsou hrany hladké."""
+    import math
+
     from PIL import Image, ImageDraw
 
-    ico = BUILD / "lumen.ico"
-    img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+    S = size * 4
+    k = S / 100  # souřadnice z SVG (viewBox 0 0 100 100)
+    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    d.ellipse((24, 24, 232, 232), fill=(0xF2, 0xA3, 0x3A, 255))  # stejný kruh jako favicon webu
-    img.save(ico, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+    # paprsky: elipsa rx 3.2, ry 6.2 se středem (50, 7), otočená po 45° kolem středu
+    for n in range(8):
+        a = math.radians(45 * n)
+        pts = []
+        for i in range(48):
+            t = 2 * math.pi * i / 48
+            x, y = 3.2 * math.cos(t), 6.2 * math.sin(t) - 43
+            pts.append(((50 + x * math.cos(a) - y * math.sin(a)) * k, (50 + x * math.sin(a) + y * math.cos(a)) * k))
+        d.polygon(pts, fill=(0xFF, 0xC9, 0x3C, 255))
+    # slunce s přechodem #FFC800 → #FF9500 (zleva shora doprava dolů)
+    grad = Image.new("RGBA", (S, S))
+    gp = grad.load()
+    x1, y1, x2, y2 = 0.2 * S, 0.15 * S, 0.85 * S, 0.9 * S
+    dx, dy = x2 - x1, y2 - y1
+    ln = dx * dx + dy * dy
+    for yy in range(S):
+        for xx in range(0, S, 4):
+            t = min(1, max(0, ((xx - x1) * dx + (yy - y1) * dy) / ln))
+            c = (255, int(0xC8 + (0x95 - 0xC8) * t), 0, 255)
+            for j in range(4):
+                gp[xx + j, yy] = c
+    mask = Image.new("L", (S, S), 0)
+    ImageDraw.Draw(mask).ellipse(((50 - 32) * k, (50 - 32) * k, (50 + 32) * k, (50 + 32) * k), fill=255)
+    img.paste(grad, (0, 0), mask)
+    # ikona stažení: bílé čáry s kulatými konci
+    w = 5.4 * k
+    white = (255, 255, 255, 255)
+
+    def line(points):
+        pts = [(x * k, y * k) for x, y in points]
+        d.line(pts, fill=white, width=int(w), joint="curve")
+        for x, y in pts:
+            d.ellipse((x - w / 2, y - w / 2, x + w / 2, y + w / 2), fill=white)
+
+    line([(50, 31), (50, 58.3)])
+    line([(39.4, 47.9), (50, 58.5), (60.6, 47.9)])
+    tray = [(31.4, 57.3), (31.4, 64.6)]
+    tray += [(34.8 - 3.4 * math.cos(math.radians(a)), 64.6 + 3.4 * math.sin(math.radians(a))) for a in range(0, 91, 15)]
+    tray += [(65.2 + 3.4 * math.cos(math.radians(a)), 64.6 + 3.4 * math.sin(math.radians(a))) for a in range(90, -1, -15)]
+    tray += [(68.6, 57.3)]
+    line(tray)
+    return img.resize((size, size), Image.LANCZOS)
+
+
+def make_icon() -> Path:
+    ico = BUILD / "lumen.ico"
+    draw_logo(256).save(ico, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
     return ico
 
 

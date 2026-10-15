@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <title>lumen</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='%23F2A33A'/%3E%3C/svg%3E">
+  <link rel="icon" href="/logo-small.svg?v=1" type="image/svg+xml">
   <script>
     // Nastaví motiv ještě před vykreslením, aby stránka neblikla.
     try {
@@ -16,7 +16,7 @@
       document.documentElement.dataset.accent = s.accent || "amber";
     } catch (e) {}
   </script>
-  <link rel="stylesheet" href="/style.css?v=13">
+  <link rel="stylesheet" href="/style.css?v=14">
 </head>
 <body>
 
@@ -48,7 +48,7 @@
 <div class="glow" id="glow" aria-hidden="true"><img id="glowImg" alt="" referrerpolicy="no-referrer"></div>
 
 <nav class="rail" aria-label="Hlavní navigace">
-  <a class="brand" href="#/">lumen</a>
+  <a class="brand" href="#/"><img src="/logo-small.svg?v=1" alt="" width="34" height="34">lumen</a>
   <div class="rail-links">
     <a href="#/" data-route="download"><svg class="ico"><use href="#i-download"/></svg><span>Stáhnout</span></a>
     <a href="#/music" data-route="music"><svg class="ico"><use href="#i-music"/></svg><span>Hudba</span></a>
@@ -64,7 +64,7 @@
 
   <!-- Stáhnout -->
   <section class="view active" data-view="download" aria-labelledby="h-download">
-    <h1 class="wordmark" id="h-download">lumen</h1>
+    <h1 class="wordmark" id="h-download"><img class="wordmark-logo" src="/logo.svg?v=1" alt="">lumen</h1>
 
     <form id="urlForm" class="pill" autocomplete="off">
       <input id="urlInput" type="text" inputmode="url" spellcheck="false" placeholder="Vlož odkaz na video nebo skladbu" aria-label="Odkaz na video nebo skladbu">

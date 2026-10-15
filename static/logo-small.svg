@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="lumen">
+  <!-- kompaktní logo pro malé velikosti (favicon, ikona aplikace, lišta): větší slunce, kratší paprsky -->
+  <defs>
+    <linearGradient id="lumen-sun-s" x1="0.2" y1="0.15" x2="0.85" y2="0.9">
+      <stop offset="0" stop-color="#FFC800"/>
+      <stop offset="1" stop-color="#FF9500"/>
+    </linearGradient>
+  </defs>
+  <g fill="#FFC93C">
+    <ellipse cx="50" cy="7" rx="3.2" ry="6.2"/>
+    <ellipse cx="50" cy="7" rx="3.2" ry="6.2" transform="rotate(45 50 50)"/>
+    <ellipse cx="50" cy="7" rx="3.2" ry="6.2" transform="rotate(90 50 50)"/>
+    <ellipse cx="50" cy="7" rx="3.2" ry="6.2" transform="rotate(135 50 50)"/>
+    <ellipse cx="50" cy="7" rx="3.2" ry="6.2" transform="rotate(180 50 50)"/>
+    <ellipse cx="50" cy="7" rx="3.2" ry="6.2" transform="rotate(225 50 50)"/>
+    <ellipse cx="50" cy="7" rx="3.2" ry="6.2" transform="rotate(270 50 50)"/>
+    <ellipse cx="50" cy="7" rx="3.2" ry="6.2" transform="rotate(315 50 50)"/>
+  </g>
+  <circle cx="50" cy="50" r="32" fill="url(#lumen-sun-s)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M50 31V58.3"/>
+    <path d="M39.4 47.9L50 58.5L60.6 47.9"/>
+    <path d="M31.4 57.3V64.6A3.4 3.4 0 0 0 34.8 68H65.2A3.4 3.4 0 0 0 68.6 64.6V57.3"/>
+  </g>
+</svg>
