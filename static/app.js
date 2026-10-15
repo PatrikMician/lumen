@@ -117,9 +117,10 @@
   if (window.LumenHelp) LumenHelp.load();
 
   /* ---------- Navigace ---------- */
-  const ROUTES = ["download", "remux", "sites", "settings"];
+  const ROUTES = ["download", "music", "remux", "sites", "settings"];
   function route() {
-    const name = location.hash.replace(/^#\/?/, "") || "download";
+    // u hudby za lomítkem následuje podstránka (#/music/album/…), tu si řeší music.js
+    const name = location.hash.replace(/^#\/?/, "").split("/")[0] || "download";
     const current = ROUTES.includes(name) ? name : "download";
     $$(".view").forEach((v) => v.classList.toggle("active", v.dataset.view === current));
     $$(".rail a[data-route]").forEach((a) => {
@@ -292,12 +293,12 @@
     if (busy) btn.textContent = "Načítám…"; else updateSubmitLabel();
   }
 
-  async function startDownload({ url, title = null, thumbnail = null }) {
+  async function startDownload({ url, title = null, thumbnail = null, mode = null }) {
     const res = await api("/api/download", {
       method: "POST",
       body: {
         url, title, thumbnail,
-        mode: S.mode,
+        mode: mode || S.mode,
         quality: S.quality,
         container: S.container,
         audio_format: S.audioFormat,
@@ -309,8 +310,10 @@
     seenActive.add(res.id);
     toast("Přidáno do fronty");
     loadQuota();
-    input.value = "";
-    hidePreview();
+    if (!mode) {
+      input.value = "";
+      hidePreview();
+    }
     poll();
   }
 
@@ -629,6 +632,7 @@
     $("#keyInput").hidden = Q.has_key;
     $("#keySubmit").hidden = Q.has_key;
     renderRequest();
+    renderIncrease();
 
     if (!Q.enabled) { hint.hidden = true; return; }
 
@@ -636,8 +640,11 @@
     const text = $("#quotaText");
     if (Q.has_key) {
       title.textContent = "Bez denního limitu";
-      text.textContent = Q.label ? `Přístupový klíč „${Q.label}“ je aktivní.` : "Přístupový klíč je aktivní.";
-      $("#keyHelp").textContent = "Klíč je přiřazený k tomuhle zařízení a jinde nefunguje. Odebrat ho můžeš, na tomhle zařízení ho pak zadáš znovu.";
+      const devices = Q.key_devices ? ` Platí na ${Q.key_devices} zař., obsazeno ${Q.key_used}.` : "";
+      text.textContent = (Q.label ? `Přístupový klíč „${Q.label}“ je aktivní.` : "Přístupový klíč je aktivní.") + devices;
+      $("#keyHelp").textContent = Q.key_devices > 1
+        ? "Klíč funguje jen na zařízeních, kde byl zadaný, dokud nejsou všechna místa obsazená. Odebrat ho můžeš, na tomhle zařízení ho pak zadáš znovu."
+        : "Klíč je přiřazený k tomuhle zařízení a jinde nefunguje. Odebrat ho můžeš, na tomhle zařízení ho pak zadáš znovu.";
       hint.hidden = true;
       return;
     }
@@ -674,8 +681,19 @@
       return r && r.email && Date.now() - r.ts < REQ_KEEP ? r : null;
     } catch { return null; }
   }
-  function rememberRequest(email) {
-    try { localStorage.setItem(REQ_KEY, JSON.stringify({ email, ts: Date.now() })); } catch { /* úložiště nemusí být dostupné */ }
+  function rememberRequest(email, devices = 1) {
+    try { localStorage.setItem(REQ_KEY, JSON.stringify({ email, devices, ts: Date.now() })); } catch { /* úložiště nemusí být dostupné */ }
+  }
+  /* e-mail z poslední žádosti, ať ho u navýšení nemusí psát znovu */
+  function knownEmail() {
+    try { return (JSON.parse(localStorage.getItem(REQ_KEY) || "null") || {}).email || ""; } catch { return ""; }
+  }
+
+  function fillDevices(sel, from, to, value) {
+    const items = [];
+    for (let n = from; n <= to; n++) items.push([String(n), String(n)]);
+    if (!items.length) items.push([String(from), String(from)]);
+    fillSelect(sel, items, String(value));
   }
   function forgetRequest() {
     try { localStorage.removeItem(REQ_KEY); } catch { /* nevadí */ }
@@ -690,32 +708,97 @@
     $("#requestSent").hidden = !sent;
     if (sent) {
       $("#requestHelp").textContent = "Teď už jen počkej na e-mail s klíčem.";
+      const devices = sent.devices > 1 ? ` na ${sent.devices} zařízení` : "";
       $("#requestSentText").replaceChildren(
-        "Klíč ti pošlu e-mailem na ",
+        `Klíč${devices} ti pošlu e-mailem na `,
         Object.assign(document.createElement("strong"), { textContent: sent.email }),
         ". Odpovídám ručně, takže to může chvíli trvat. Kdyby nic nepřišlo, podívej se i do spamu."
       );
     } else {
-      $("#requestHelp").textContent = "Napiš svůj e-mail a pošli žádost. Klíč ti vystavím ručně a pošlu ho na tuhle adresu. Může to trvat i několik hodin, někdy déle.";
+      $("#requestHelp").textContent = "Napiš svůj e-mail, vyber, na kolika zařízeních klíč chceš používat, a pošli žádost. Klíč ti vystavím ručně a pošlu ho na tuhle adresu. Může to trvat i několik hodin, někdy déle.";
+      const sel = $("#requestDevices");
+      fillDevices(sel, 1, Q.max_request_devices || 1, sel.value || "1");
     }
   }
+
+  const EMAIL_OK = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
   $("#requestForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const email = $("#requestEmail").value.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+    if (!EMAIL_OK.test(email)) {
       toast("Zadej platnou e-mailovou adresu, třeba jmeno@seznam.cz.", true);
       $("#requestEmail").focus();
       return;
     }
+    const devices = Number($("#requestDevices").value) || 1;
     const btn = $("#requestSubmit");
     btn.disabled = true;
     try {
-      const r = await api("/api/key/request", { method: "POST", body: { email, website: $("#requestWebsite").value } });
-      if (r.email) rememberRequest(r.email); else rememberRequest(email);
+      const r = await api("/api/key/request", {
+        method: "POST",
+        body: { email, devices, reason: $("#requestReason").value.trim(), website: $("#requestWebsite").value },
+      });
+      rememberRequest(r.email || email, devices);
       $("#requestEmail").value = "";
+      $("#requestReason").value = "";
       renderRequest();
       toast("Žádost odeslána. Klíč ti přijde e-mailem.");
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  /* Žádost o víc zařízení (jen s aktivním klíčem) */
+  function renderIncrease() {
+    const box = $("#increaseSetting");
+    box.hidden = !Q || !Q.has_key || !Q.key_devices;
+    if (box.hidden) return;
+    const top = Q.max_request_devices || 1;
+    const pending = Q.increase_pending;
+    const full = Q.key_devices >= top;
+    $("#increaseForm").hidden = !!pending || full;
+    $("#increaseSent").hidden = !pending;
+    if (pending) {
+      $("#increaseHelp").textContent = "Žádost čeká na schválení.";
+      $("#increaseSentText").textContent = `Požádal jsi o ${pending.devices} zařízení. Až ji provozovatel schválí, přijde ti e-mail a klíč půjde zadat na dalších zařízeních.`;
+    } else if (full) {
+      $("#increaseHelp").textContent = `Klíč platí na ${Q.key_devices} zařízení, víc přes web žádat nejde. Kdybys potřeboval víc, napiš provozovateli.`;
+    } else {
+      $("#increaseHelp").textContent = "Potřebuješ klíč i na dalším zařízení? Vyber nový počet, napiš důvod a provozovatel žádost schválí nebo počet upraví.";
+      const sel = $("#increaseDevices");
+      const from = Q.key_devices + 1;
+      fillDevices(sel, from, top, Math.max(from, Number(sel.value) || from));
+      if (!$("#increaseEmail").value) $("#increaseEmail").value = knownEmail();
+    }
+  }
+
+  $("#increaseForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = $("#increaseEmail").value.trim();
+    const reason = $("#increaseReason").value.trim();
+    if (!EMAIL_OK.test(email)) {
+      toast("Zadej platnou e-mailovou adresu, třeba jmeno@seznam.cz.", true);
+      $("#increaseEmail").focus();
+      return;
+    }
+    if (reason.length < 3) {
+      toast("Napiš důvod, proč potřebuješ víc zařízení.", true);
+      $("#increaseReason").focus();
+      return;
+    }
+    const btn = $("#increaseSubmit");
+    btn.disabled = true;
+    try {
+      const r = await api("/api/key/increase", {
+        method: "POST",
+        body: { email, devices: Number($("#increaseDevices").value), reason, website: $("#increaseWebsite").value },
+      });
+      $("#increaseReason").value = "";
+      toast(r.duplicate ? "Žádost o navýšení už čeká na schválení." : "Žádost o navýšení odeslána.");
+      await loadQuota();
     } catch (err) {
       toast(err.message, true);
     } finally {
@@ -734,6 +817,7 @@
     try {
       Q = await api("/api/quota");
       renderQuota();
+      quotaListeners.forEach((fn) => { try { fn(Q); } catch { /* chyba v posluchači nesmí shodit limit */ } });
     } catch { /* server ještě startuje */ }
     // kdyby se mezitím uvolnilo místo v limitu nebo klíč zrušili, stav se po čase obnoví
     quotaTimer = setTimeout(loadQuota, 5 * 60 * 1000);
@@ -784,6 +868,16 @@
       banner.hidden = msgs.length === 0;
     } catch { /* server ještě startuje */ }
   }
+
+  /* ---------- Pro music.js ---------- */
+  window.Lumen = {
+    api, toast, fmtTime,
+    // stažení skladby z přehrávače: vždy jako zvuk ve formátu z nastavení
+    downloadAudio: (track) => startDownload({ url: track.url, title: track.title, thumbnail: track.thumb, mode: "audio" }),
+    hasKey: () => !!(Q && Q.has_key),
+    onQuota: (fn) => quotaListeners.push(fn),
+  };
+  const quotaListeners = [];
 
   /* ---------- Start ---------- */
   $$("[data-setting]").forEach((el) => {

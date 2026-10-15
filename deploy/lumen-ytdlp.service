@@ -1,0 +1,12 @@
+[Unit]
+Description=Lumen: noční aktualizace yt-dlp
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# přes bash, ať nevadí chybějící spustitelný bit (repo se spravuje i z Windows)
+ExecStart=/bin/bash /opt/lumen/deploy/ytdlp-update.sh
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=45min

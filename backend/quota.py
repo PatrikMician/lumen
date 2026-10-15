@@ -7,7 +7,8 @@
   V souboru data/keys.json jsou jen hashe klíčů, samotný klíč se zobrazí jednou
   při vytvoření. Klíč se při prvním zadání přiřadí k prohlížeči (zařízení), kde byl
   zadán, a jinde nefunguje. Počet zařízení na klíč se nastaví při vytvoření
-  (výchozí 1), uvolnit ho může jen provozovatel (`keys.py reset`).
+  (výchozí 1), navýšit ho jde schválením žádosti z webu nebo `keys.py devices`,
+  uvolnit ho může jen provozovatel (`keys.py reset`).
 
 Modul používá jen standardní knihovnu, takže ho jde načíst i z keys.py.
 """
@@ -244,6 +245,28 @@ def revoke_key(ident: str) -> bool:
     if hit:
         _save(records)
     return hit
+
+
+def find_key(ident) -> Optional[dict]:
+    """Platný (nezrušený) klíč podle čísla, nebo None."""
+    for r in _load():
+        if str(r.get("id")) == str(ident) and not r.get("revoked"):
+            return r
+    return None
+
+
+def set_max_devices(ident, max_devices: int) -> Optional[dict]:
+    """Nastaví, na kolik zařízení klíč platí (podle čísla nebo přesného popisku). Už přiřazená zařízení zůstanou,
+    takže limit nejde snížit pod jejich počet (k tomu je `reset`). Vrátí upravený záznam, nebo None."""
+    with _keys_lock:
+        records = json.loads(KEYS_FILE.read_text("utf-8")) if KEYS_FILE.exists() else []
+        for r in records:
+            if (str(r.get("id")) == str(ident) or r.get("label") == ident) and not r.get("revoked"):
+                r["max_devices"] = max(1, int(max_devices), len(r.get("devices", [])))
+                _save(records)
+                _keys_cache["mtime"] = None
+                return r
+    return None
 
 
 def reset_key(ident: str) -> bool:

@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from yt_dlp.version import __version__ as YTDLP_VERSION
 
-from . import keyrequests, quota
+from . import keyrequests, music, quota
 
 # --------------------------------------------------------------------------
 # Nastavení (jde měnit proměnnými prostředí, viz README)
@@ -143,7 +143,7 @@ def save_owner(jid: str, sid: str):
 # --------------------------------------------------------------------------
 # Limity a kontrola vstupu
 # --------------------------------------------------------------------------
-_history: dict = {"download": {}, "info": {}, "key": {}, "request": {}, "approve": {}}
+_history: dict = {"download": {}, "info": {}, "key": {}, "request": {}, "approve": {}, "music": {}, "music_track": {}}
 _history_lock = threading.Lock()
 
 
@@ -384,6 +384,8 @@ def health():
         "auth": bool(AUTH_PASSWORD),
         "keep_hours": KEEP_HOURS,
         "daily_limit": DAILY_LIMIT,
+        "music": music.MUSIC_ENABLED,
+        "active": sum(1 for j in jobs.values() if j["status"] in ACTIVE),  # noční aktualizace yt-dlp čeká, až bude 0
     }
 
 
@@ -398,7 +400,12 @@ def get_quota(request: Request):
     out = {"enabled": DAILY_LIMIT > 0, "has_key": bool(rec), "label": rec["label"] if rec else None,
            "stale_key": bool(request.cookies.get(KEY_COOKIE)) and not rec,
            "can_request": DAILY_LIMIT > 0 and not rec,
+           "max_request_devices": keyrequests.MAX_REQUEST_DEVICES,
            "limit": DAILY_LIMIT, "used": 0, "remaining": DAILY_LIMIT, "reset_in": None}
+    if rec:
+        pending = keyrequests.open_increase(rec.get("id"))
+        out.update(key_devices=int(rec.get("max_devices", 1)), key_used=len(rec.get("devices", [])),
+                   increase_pending={"devices": keyrequests.requested_devices(pending), "ts": pending["ts"]} if pending else None)
     if DAILY_LIMIT > 0 and not rec:
         used, reset_in = quota.usage(quota.who(request))
         out.update(used=used, remaining=max(0, DAILY_LIMIT - used), reset_in=reset_in)
@@ -427,7 +434,16 @@ def set_key(body: KeyIn, request: Request, response: Response):
 
 class KeyRequestIn(BaseModel):
     email: str
+    devices: int = 1
+    reason: str = ""
     website: str = ""  # past na boty: lidem je pole skryté, roboti ho vyplní
+
+
+def check_devices(devices: int, low: int = 1):
+    top = keyrequests.MAX_REQUEST_DEVICES
+    if not low <= devices <= top:
+        raise HTTPException(400, f"Počet zařízení musí být {low} až {top}." if low < top
+                            else f"Počet zařízení může být nejvýš {top}.")
 
 
 @app.post("/api/key/request")
@@ -442,14 +458,43 @@ def request_key(body: KeyRequestIn, request: Request, background: BackgroundTask
     email = keyrequests.valid_email(body.email)
     if not email:
         raise HTTPException(400, "Zadej platnou e-mailovou adresu, třeba jmeno@seznam.cz.")
+    check_devices(body.devices)
     rate_check("request", quota.who(request), 3, 24 * 3600,
                "Dnes jsi už žádal několikrát. Počkej prosím na odpověď, klíč ti přijde e-mailem.")
-    rec, status = keyrequests.add_request(email)
+    rec, status = keyrequests.add_request(email, body.devices, body.reason)
     if status == "full":
         raise HTTPException(503, "Dnes už přišlo hodně žádostí. Zkus to prosím zítra.")
     if status == "ok":
         background.add_task(keyrequests.notify, rec)
-    return {"ok": True, "email": email}
+    return {"ok": True, "email": email, "devices": body.devices}
+
+
+@app.post("/api/key/increase")
+def request_increase(body: KeyRequestIn, request: Request, background: BackgroundTasks):
+    """Žádost o víc zařízení u klíče, který má tohle zařízení aktivní. Důvod je povinný."""
+    key = current_key(request)
+    if not key:
+        raise HTTPException(403, "O víc zařízení jde požádat jen s aktivním přístupovým klíčem.")
+    if body.website.strip():
+        return {"ok": True, "email": "", "devices": body.devices}
+    email = keyrequests.valid_email(body.email)
+    if not email:
+        raise HTTPException(400, "Zadej platnou e-mailovou adresu, třeba jmeno@seznam.cz.")
+    current = int(key.get("max_devices", 1))
+    if current >= keyrequests.MAX_REQUEST_DEVICES:
+        raise HTTPException(400, f"Klíč už platí na {current} zařízení, víc přes web žádat nejde. Napiš provozovateli.")
+    check_devices(body.devices, current + 1)
+    reason = keyrequests.clean_reason(body.reason)
+    if len(reason) < 3:
+        raise HTTPException(400, "Napiš důvod, proč potřebuješ víc zařízení.")
+    rate_check("request", quota.who(request), 3, 24 * 3600,
+               "Dnes jsi už žádal několikrát. Počkej prosím na odpověď, klíč ti přijde e-mailem.")
+    rec, status = keyrequests.add_request(email, body.devices, reason, key=key)
+    if status == "full":
+        raise HTTPException(503, "Dnes už přišlo hodně žádostí. Zkus to prosím zítra.")
+    if status == "ok":
+        background.add_task(keyrequests.notify, rec)
+    return {"ok": True, "email": email, "devices": keyrequests.requested_devices(rec), "duplicate": status == "duplicate"}
 
 
 # --- Schválení žádosti odkazem z e-mailu -----------------------------------------
@@ -463,7 +508,11 @@ def _page(title: str, body_html: str, status: int = 200) -> HTMLResponse:
         "h1{font-size:1.5rem;margin:0 0 .6em}form{display:inline-block;margin:.4em .4em 0 0}"
         "button{font:inherit;font-weight:600;padding:.7em 1.4em;border:0;border-radius:999px;cursor:pointer;background:#f4a43a;color:#1d1b2e}"
         "button.no{background:#e4e0ef}code{display:block;margin:.8em 0;padding:.8em 1em;background:#fff;border-radius:10px;word-break:break-all}"
-        ".muted{color:#6a6580;font-size:.92rem}</style></head><body>"
+        ".muted{color:#6a6580;font-size:.92rem}"
+        "label{display:flex;align-items:center;gap:.7em;margin:1em 0 .2em;font-weight:600}"
+        "input[type=number]{font:inherit;width:5.5em;padding:.45em .7em;border:1px solid #d6cfe9;border-radius:10px;background:#fff}"
+        "blockquote{margin:.6em 0;padding:.7em 1em;background:#fff;border-left:3px solid #f4a43a;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere}"
+        "</style></head><body>"
         f"{body_html}</body></html>"
     )
     return HTMLResponse(doc, status_code=status, headers={
@@ -480,35 +529,89 @@ def approve_page(request: Request, id: int, t: str):
                      "Čekající žádosti uvidíš na serveru příkazem <code>sudo lumenkeys requests</code>.</p>", 404)
     mail = html.escape(rec["email"])
     tok = html.escape(t, quote=True)
-    return _page("Žádost o klíč", f"""<h1>Žádost o klíč</h1>
-<p>Žádá <strong>{mail}</strong>.</p>
-<p class="muted">Po schválení se vytvoří klíč na {keyrequests.APPROVE_DEVICES} zařízení a pošle se na tuhle adresu.</p>
-<form method="post" action="/api/key/approve"><input type="hidden" name="id" value="{rec['id']}"><input type="hidden" name="t" value="{tok}">
-<button name="action" value="approve">Schválit a poslat klíč</button></form>
-<form method="post" action="/api/key/approve"><input type="hidden" name="id" value="{rec['id']}"><input type="hidden" name="t" value="{tok}">
+    devices = keyrequests.requested_devices(rec)
+    hidden = f'<input type="hidden" name="id" value="{rec["id"]}"><input type="hidden" name="t" value="{tok}">'
+    reason = f"<p>Důvod:</p><blockquote>{html.escape(rec['reason'])}</blockquote>" if rec.get("reason") else ""
+    if rec.get("kind") == "increase":
+        key = quota.find_key(rec.get("key_id"))
+        if not key:
+            return _page("Klíč neexistuje", f"<h1>Klíč už neexistuje</h1><p>Klíč č. {html.escape(str(rec.get('key_id')))} "
+                         "je zrušený nebo smazaný, navýšení nejde schválit. Žádost můžeš zamítnout.</p>"
+                         f'<form method="post" action="/api/key/approve">{hidden}<button class="no" name="action" value="deny">Zamítnout</button></form>', 410)
+        used = len(key.get("devices", []))
+        low = max(1, used)
+        title = "Žádost o víc zařízení"
+        intro = (f"<p><strong>{mail}</strong> žádá u klíče č. {key['id']} „{html.escape(key.get('label', ''))}“ o "
+                 f"<strong>{devices}</strong> zařízení. Teď klíč platí na {key.get('max_devices', 1)} zař., obsazená jsou {used}.</p>")
+        note = '<p class="muted">Po schválení se počet hned změní a žadateli přijde e-mail. Níž než počet obsazených zařízení jít nejde (k tomu je <code style="display:inline;padding:0 .3em">lumenkeys reset</code>).</p>'
+        button = "Schválit navýšení"
+    else:
+        low = 1
+        title = "Žádost o klíč"
+        intro = f"<p>Žádá <strong>{mail}</strong> o klíč na <strong>{devices}</strong> zařízení.</p>"
+        note = '<p class="muted">Po schválení se vytvoří klíč na zvolený počet zařízení a pošle se na tuhle adresu.</p>'
+        button = "Schválit a poslat klíč"
+    value = max(low, devices)
+    return _page(title, f"""<h1>{title}</h1>
+{intro}{reason}
+<form method="post" action="/api/key/approve">{hidden}
+<label>Počet zařízení <input type="number" name="devices" min="{low}" max="{keyrequests.MAX_DEVICES}" value="{value}" required></label>
+{note}
+<button name="action" value="approve">{button}</button></form>
+<form method="post" action="/api/key/approve">{hidden}
 <button class="no" name="action" value="deny">Zamítnout</button></form>""")
 
 
 @app.post("/api/key/approve")
-def approve_action(request: Request, id: int = Form(...), t: str = Form(...), action: str = Form(...)):
+def approve_action(request: Request, id: int = Form(...), t: str = Form(...), action: str = Form(...),
+                   devices: Optional[int] = Form(None)):
     rate_check("approve", quota.who(request), 30, 3600, "Moc pokusů. Zkus to za hodinu.")
     if action not in ("approve", "deny"):
         raise HTTPException(400, "Neznámá akce.")
-    rec = keyrequests.resolve_request(id, t, "approved" if action == "approve" else "denied")
+    if action == "approve":
+        pending = keyrequests.peek_request(id, t)
+        if pending and devices is None:
+            devices = keyrequests.requested_devices(pending)
+        if pending and not 1 <= devices <= keyrequests.MAX_DEVICES:
+            # žádost se nevyřídí, odkaz platí dál
+            return _page("Neplatný počet", f"<h1>Neplatný počet zařízení</h1><p>Zadej číslo od 1 do {keyrequests.MAX_DEVICES}. "
+                         "Vrať se zpět a schval znovu, žádost pořád čeká.</p>", 400)
+        if pending and pending.get("kind") == "increase" and not quota.find_key(pending.get("key_id")):
+            return _page("Klíč neexistuje", "<h1>Klíč už neexistuje</h1><p>Klíč je zrušený nebo smazaný, navýšení nejde "
+                         "schválit. Vrať se zpět a žádost zamítni.</p>", 410)
+    rec = keyrequests.resolve_request(id, t, "approved" if action == "approve" else "denied", devices)
     if not rec:
         return _page("Odkaz neplatí", "<h1>Odkaz neplatí</h1><p>Žádost už je vyřízená nebo odkaz vypršel.</p>", 404)
     mail = html.escape(rec["email"])
     if action == "deny":
         return _page("Zamítnuto", f"<h1>Zamítnuto</h1><p>Žádost od <strong>{mail}</strong> je zamítnutá. Žadateli se nic neposílá.</p>")
-    key = quota.add_key(rec["email"], keyrequests.APPROVE_DEVICES)
+
+    if rec.get("kind") == "increase":
+        key = quota.set_max_devices(rec.get("key_id"), devices)
+        if not key:
+            return _page("Klíč neexistuje", "<h1>Klíč už neexistuje</h1><p>Mezitím ho někdo zrušil, nic se nezměnilo.</p>", 410)
+        final = int(key["max_devices"])
+        lowered = (f'<p class="muted">Zadal jsi {devices}, ale klíč už má obsazených {final} zařízení, '
+                   f"takže zůstává na {final}.</p>") if final != devices else ""
+        try:
+            keyrequests.send_devices_mail(rec["email"], final)
+        except Exception as exc:  # noqa: BLE001 - navýšení už platí, jen se o něm žadatel nedozví e-mailem
+            print(f"E-mail o navýšení (žádost č. {rec['id']}) se nepodařilo odeslat: {type(exc).__name__}: {exc}", flush=True)
+            return _page("E-mail neodešel", f"<h1>Navýšení platí, e-mail neodešel</h1><p>Klíč č. {key['id']} teď platí "
+                         f"na <strong>{final}</strong> zařízení, ale e-mail pro <strong>{mail}</strong> se nepodařilo poslat. "
+                         f"Dej mu vědět sám.</p>{lowered}", 502)
+        return _page("Hotovo", f"<h1>Hotovo</h1><p>Klíč č. {key['id']} teď platí na <strong>{final}</strong> zařízení "
+                     f"a <strong>{mail}</strong> dostal e-mail.</p>{lowered}")
+
+    key = quota.add_key(rec["email"], devices)
     try:
-        keyrequests.send_key_mail(rec["email"], key)
+        keyrequests.send_key_mail(rec["email"], key, devices)
     except Exception as exc:  # noqa: BLE001 - klíč už existuje, provozovatel ho musí dostat jinak
         print(f"Klíč pro žádost č. {rec['id']} se nepodařilo odeslat: {type(exc).__name__}: {exc}", flush=True)
         return _page("Klíč se neodeslal", f"""<h1>Klíč se nepodařilo odeslat</h1>
-<p>E-mail pro <strong>{mail}</strong> neodešel, ale klíč je vytvořený. Pošli mu ho sám (zobrazí se jen teď):</p>
+<p>E-mail pro <strong>{mail}</strong> neodešel, ale klíč na {devices} zař. je vytvořený. Pošli mu ho sám (zobrazí se jen teď):</p>
 <code>{html.escape(key)}</code>""", 502)
-    return _page("Hotovo", f"<h1>Hotovo</h1><p>Klíč je vytvořený a odeslaný na <strong>{mail}</strong>.</p>"
+    return _page("Hotovo", f"<h1>Hotovo</h1><p>Klíč na <strong>{devices}</strong> zař. je vytvořený a odeslaný na <strong>{mail}</strong>.</p>"
                  '<p class="muted">Kdyby e-mail nedorazil, podívej se žadateli do spamu. Klíč nejde zobrazit znovu, jen vystavit nový.</p>')
 
 
@@ -903,6 +1006,10 @@ def sites():
 # --------------------------------------------------------------------------
 restore_jobs()
 threading.Thread(target=janitor, daemon=True).start()
+
+music.configure(rate_check=rate_check, current_key=current_key, base_opts=base_opts, is_public_host=is_public_host,
+                friendly=friendly, daily_limit=DAILY_LIMIT)
+app.include_router(music.router)
 
 # Statické soubory musí být připojené jako poslední, aby nepřebily /api.
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

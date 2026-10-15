@@ -5,10 +5,11 @@ Klíč se při prvním zadání přiřadí k prohlížeči (zařízení), kde by
 Použití (ve složce projektu, přes python z .venv, bez sudo):
     python keys.py add "Honza"                vytvoří klíč pro 1 zařízení a vypíše ho (zobrazí se jen teď)
     python keys.py add "Honza" --devices 2    klíč pro 2 zařízení (např. telefon a počítač té samé osoby)
-    python keys.py add "a@b.cz" --request 4   vytvoří klíč a označí žádost č. 4 jako vyřízenou
-    python keys.py requests                   čekající žádosti o klíč z webu (e-mail, kdy přišla)
-    python keys.py requests done 4            označí žádost č. 4 jako vyřízenou, aniž by se vytvářel klíč
+    python keys.py add "a@b.cz" --request 4   vytvoří klíč (na počet zařízení ze žádosti) a označí žádost č. 4 jako vyřízenou
+    python keys.py requests                   čekající žádosti z webu (nový klíč / víc zařízení, počet, důvod)
+    python keys.py requests done 4            označí žádost č. 4 jako vyřízenou, aniž by se cokoliv měnilo
     python keys.py list                       seznam klíčů a kolik zařízení mají obsazených
+    python keys.py devices 3 4                klíč č. 3 bude platit na 4 zařízení (přidej --request N, ať se vyřídí i žádost)
     python keys.py reset 3                    uvolní zařízení klíče č. 3 (nový telefon, vymazané cookies)
     python keys.py revoke 3                   zruší klíč č. 3 úplně
 
@@ -20,30 +21,36 @@ import time
 from backend import keyrequests, quota
 
 
+def take_int(rest: list, flag: str):
+    """Vytáhne z argumentů `flag N`. Vrátí (N nebo None, chyba)."""
+    if flag not in rest:
+        return None, False
+    i = rest.index(flag)
+    try:
+        value = int(rest[i + 1])
+    except (IndexError, ValueError):
+        return None, True
+    del rest[i:i + 2]
+    return value, False
+
+
 def main(argv):
     args = argv[1:]
     cmd = args[0] if args else ""
     rest = args[1:]
 
     if cmd == "add":
-        devices = 1
-        if "--devices" in rest:
-            i = rest.index("--devices")
-            try:
-                devices = int(rest[i + 1])
-                del rest[i:i + 2]
-            except (IndexError, ValueError):
-                print("Za --devices musí být číslo, třeba: python keys.py add \"Honza\" --devices 2")
-                return 1
-        request_id = None
-        if "--request" in rest:
-            i = rest.index("--request")
-            try:
-                request_id = int(rest[i + 1])
-                del rest[i:i + 2]
-            except (IndexError, ValueError):
-                print("Za --request musí být číslo žádosti z `python keys.py requests`.")
-                return 1
+        devices, bad = take_int(rest, "--devices")
+        if bad:
+            print("Za --devices musí být číslo, třeba: python keys.py add \"Honza\" --devices 2")
+            return 1
+        request_id, bad = take_int(rest, "--request")
+        if bad:
+            print("Za --request musí být číslo žádosti z `python keys.py requests`.")
+            return 1
+        if devices is None:
+            asked = next((r for r in keyrequests.list_requests(only_open=False) if r.get("id") == request_id), None)
+            devices = keyrequests.requested_devices(asked) if asked else 1
         label = " ".join(rest) or "bez popisku"
         key = quota.add_key(label, devices)
         if request_id is not None:
@@ -66,10 +73,38 @@ def main(argv):
         for r in open_requests:
             when = time.strftime("%d.%m.%Y %H:%M", time.localtime(r.get("ts", 0)))
             mail = {True: "e-mail odeslán", False: "e-mail se NEODESLAL", None: "e-mail se odesílá"}[r.get("mailed")]
-            print(f"{r['id']:>3}  {when}  {r['email']:<36} {mail}")
+            devices = keyrequests.requested_devices(r)
+            what = (f"víc zař.: klíč č. {r.get('key_id')} {r.get('current_devices', '?')} → {devices}"
+                    if r.get("kind") == "increase" else f"nový klíč na {devices} zař.")
+            print(f"{r['id']:>3}  {when}  {r['email']:<36} {what:<34} {mail}")
+            if r.get("reason"):
+                print("     důvod: " + r["reason"].replace("\n", " / "))
+            print("     vyřízení: " + keyrequests.manual_command(r).replace("sudo lumenkeys", "lumenkeys"))
         if open_requests:
             print()
-            print('Vyřízení: sudo lumenkeys add "<e-mail>" --request <číslo>   a klíč pošli na ten e-mail.')
+            print("Klíč pak pošli žadateli na jeho e-mail (u navýšení mu jen dej vědět).")
+    elif cmd == "devices" and len(rest) >= 2:
+        request_id, bad = take_int(rest, "--request")
+        if bad:
+            print("Za --request musí být číslo žádosti z `python keys.py requests`.")
+            return 1
+        try:
+            count = int(rest[-1])
+        except ValueError:
+            print("Počet zařízení musí být číslo, třeba: python keys.py devices 3 4")
+            return 1
+        if count < 1:
+            print("Počet zařízení musí být aspoň 1.")
+            return 1
+        rec = quota.set_max_devices(" ".join(rest[:-1]), count)
+        if not rec:
+            print("Takový platný klíč jsem nenašel (zkus číslo z `python keys.py list`).")
+            return 1
+        if request_id is not None:
+            keyrequests.mark_done(request_id)
+        final = rec["max_devices"]
+        note = f" (zadáno {count}, ale obsazených je už {final})" if final != count else ""
+        print(f"Klíč č. {rec['id']} „{rec['label']}“ teď platí na {final} zařízení{note}.")
     elif cmd == "list":
         records = quota.list_keys()
         if not records:

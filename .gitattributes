@@ -4,3 +4,4 @@
 deploy/lumenkeys text eol=lf
 deploy/*.service text eol=lf
 deploy/*.example text eol=lf
+deploy/*.timer text eol=lf

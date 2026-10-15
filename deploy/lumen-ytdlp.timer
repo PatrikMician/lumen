@@ -1,0 +1,11 @@
+[Unit]
+Description=Lumen: noční aktualizace yt-dlp
+
+[Timer]
+# každou noc mezi 4:00 a 4:30; když server v tu dobu neběžel, aktualizace se udělá po startu
+OnCalendar=*-*-* 04:00
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -331,6 +331,25 @@
    ]
   },
   {
+   "code": "E143",
+   "group": "Přístup",
+   "title": "Žádost o počet zařízení nejde odeslat",
+   "summary": "Žádost o klíč nebo o víc zařízení něco postrádá: počet zařízení je mimo povolený rozsah, chybí důvod, nebo klíč na tomhle zařízení není aktivní.",
+   "steps": [
+    "Vyber počet zařízení z nabídky. Přes web jde požádat jen o tolik zařízení, kolik nabídka ukazuje.",
+    "U žádosti o víc zařízení napiš krátký důvod, třeba „nový telefon a tablet“.",
+    "O víc zařízení jde požádat jen na zařízení, kde je klíč už zadaný a funguje (Nastavení → Přístup).",
+    "Pokud klíč platí na maximální počet zařízení a potřebuješ víc, napiš provozovateli."
+   ],
+   "match": [
+    "Počet zařízení musí",
+    "Počet zařízení může",
+    "Napiš důvod",
+    "jen s aktivním přístupovým klíčem",
+    "víc přes web žádat nejde"
+   ]
+  },
+  {
    "code": "E150",
    "group": "Přístup",
    "title": "Moc pokusů za sebou",
@@ -434,6 +453,81 @@
     "jako náhled",
     "Video se nepodařilo načíst",
     "Tenhle formát prohlížeč nepřehraje"
+   ]
+  },
+  {
+   "code": "E180",
+   "group": "Hudba",
+   "title": "Online hudba je jen s přístupovým klíčem",
+   "summary": "Přehrávání hudby z internetu jde přes server a ten by ji pro všechny neutáhl, proto je jen pro návštěvníky s klíčem. Hudba ze tvého zařízení funguje i bez něj.",
+   "steps": [
+    "Zadej přístupový klíč v Nastavení → Přístup, nebo tam o něj požádej.",
+    "Hudbu, kterou máš stáhnutou, si pustíš v Hudba → V zařízení i bez klíče."
+   ],
+   "match": [
+    "Online hudba je jen s přístupovým klíčem",
+    "Hudba je na tomhle serveru vypnutá"
+   ]
+  },
+  {
+   "code": "E181",
+   "group": "Hudba",
+   "title": "Hudební katalog teď nejde načíst",
+   "summary": "Server se nedokázal spojit s hudebním katalogem, nebo katalog změnil formát odpovědí.",
+   "steps": [
+    "Počkej chvíli a zkus to znovu.",
+    "Když to nejde ani za hodinu, dej vědět provozovateli a přilož kód E181. Obvykle pomůže aktualizace knihoven na serveru."
+   ],
+   "match": [
+    "Hudební katalog teď nejde načíst",
+    "Neplatný odkaz na hudbu",
+    "Neznámý druh hledání"
+   ]
+  },
+  {
+   "code": "E182",
+   "group": "Hudba",
+   "title": "Skladbu se nepodařilo přehrát",
+   "summary": "Server ke skladbě nezískal zvuk. Skladba může být v Česku nedostupná, jen pro předplatitele, nebo server dočasně omezuje YouTube.",
+   "steps": [
+    "Zkus jinou verzi skladby (třeba z alba místo videoklipu).",
+    "Pokud nejde žádná skladba, server je nejspíš dočasně omezený (viz E110). Zkus to později.",
+    "Přetáčení a pauza fungují jen u skladby, která se už začala přehrávat."
+   ],
+   "match": [
+    "Skladbu se nepodařilo",
+    "Mimo rozsah skladby",
+    "Ke skladbě se nic nenašlo"
+   ]
+  },
+  {
+   "code": "E183",
+   "group": "Hudba",
+   "title": "Prohlížeč nepřehraje tenhle soubor",
+   "summary": "Soubor ze zařízení je ve formátu, který tvůj prohlížeč neumí (typicky FLAC nebo Opus v Safari na iPhonu), nebo je poškozený.",
+   "steps": [
+    "Zkus jiný prohlížeč (Chrome, Edge a Firefox umí nejvíc formátů).",
+    "Převeď soubor na MP3 nebo M4A v záložce Převod."
+   ],
+   "match": [
+    "Prohlížeč nepřehraje tenhle soubor",
+    "Soubor už není dostupný"
+   ]
+  },
+  {
+   "code": "E184",
+   "group": "Hudba",
+   "title": "Složku s hudbou se nepodařilo otevřít",
+   "summary": "Prohlížeč nepovolil přístup ke složce, nebo ve složce nenašel žádnou hudbu.",
+   "steps": [
+    "Klikni na Vybrat složku s hudbou znovu a v dotazu prohlížeče přístup povol.",
+    "Po zavření prohlížeče se přístup ke složce musí potvrdit znovu tlačítkem Znovu otevřít.",
+    "Na iPhonu a v některých prohlížečích výběr složky nejde, použij Přidat soubory.",
+    "Lumen pozná soubory MP3, M4A, AAC, Opus, OGG, FLAC, WAV a WebM."
+   ],
+   "match": [
+    "Přístup ke složce se nepodařil",
+    "Ve složce jsem nenašel žádnou hudbu"
    ]
   },
   {

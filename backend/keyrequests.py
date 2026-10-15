@@ -11,6 +11,11 @@ bez provozovatelova souhlasu, takže se aplikace nedá zneužít k rozesílání
 Odeslání e-mailu je nastavené proměnnými prostředí (viz deploy/lumen.env.example). Bez nich se žádosti
 jen ukládají a vyřídit se dají příkazem `lumenkeys requests`.
 
+Žádost má druh (kind):
+- "new"       nový klíč; žadatel si zvolí počet zařízení (1 až MAX_REQUEST_DEVICES) a může napsat důvod,
+- "increase"  navýšení počtu zařízení u klíče, který žadatel už má; důvod je povinný.
+Provozovatel na potvrzovací stránce počet zařízení schválí, nebo ho před schválením upraví.
+
 Modul používá jen standardní knihovnu.
 """
 import hashlib
@@ -45,7 +50,10 @@ TOKEN_TTL = 14 * 86400  # jak dlouho jde žádost schválit odkazem z e-mailu
 PUBLIC_URL = os.getenv("PUBLIC_URL", "").strip().rstrip("/")  # např. https://lumen.mican.dpdns.org
 if PUBLIC_URL and not PUBLIC_URL.startswith(("http://", "https://")):
     PUBLIC_URL = "https://" + PUBLIC_URL
-APPROVE_DEVICES = max(1, int(os.getenv("APPROVE_DEVICES", "1")))  # na kolik zařízení platí schválený klíč
+APPROVE_DEVICES = max(1, int(os.getenv("APPROVE_DEVICES", "1")))  # počet zařízení u starších žádostí, které ho neuvádějí
+MAX_REQUEST_DEVICES = max(1, int(os.getenv("MAX_REQUEST_DEVICES", "5")))  # kolik zařízení si jde říct z webu
+MAX_DEVICES = max(MAX_REQUEST_DEVICES, int(os.getenv("MAX_DEVICES", "20")))  # kolik zařízení může povolit provozovatel
+REASON_MAX = 500
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]{1,64}@[A-Za-z0-9\-]+(\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,24}")
 _lock = threading.Lock()
@@ -62,6 +70,17 @@ def valid_email(raw: str):
     if len(email) > 254 or not EMAIL_RE.fullmatch(email) or ".." in email:
         return None
     return email
+
+
+def clean_reason(raw: str) -> str:
+    """Důvod žádosti: bez řídicích znaků (zalomení řádků zůstanou), oříznutý na REASON_MAX znaků."""
+    text = re.sub(r"[\x00-\x09\x0b-\x1f\x7f]", " ", raw or "").replace("\r", "")
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()[:REASON_MAX]
+
+
+def requested_devices(rec: dict) -> int:
+    return max(1, int(rec.get("devices") or APPROVE_DEVICES))
 
 
 def mail_configured() -> bool:
@@ -86,33 +105,59 @@ def _write(records: list):
     os.replace(tmp, REQUESTS_FILE)
 
 
-def add_request(email: str):
-    """Uloží žádost. Vrátí (záznam, stav), kde stav je:
+def _is_open(r: dict, now: float) -> bool:
+    return not r.get("done") and now - r.get("ts", 0) < TOKEN_TTL
+
+
+def add_request(email: str, devices: int = 1, reason: str = "", key: dict = None):
+    """Uloží žádost. Bez `key` je to žádost o nový klíč, s `key` (záznam z quota) o navýšení počtu zařízení.
+    Vrátí (záznam, stav), kde stav je:
     "ok"        nová žádost, provozovatele je potřeba upozornit,
-    "duplicate" ze stejné adresy už dnes čeká žádost, nic se neposílá znovu,
+    "duplicate" stejná žádost už čeká (ze stejné adresy dnes, u navýšení pro stejný klíč), nic se neposílá znovu,
     "full"      dnes už přišlo příliš mnoho žádostí."""
     now = time.time()
+    kind = "increase" if key else "new"
     with _lock:
         records = _read()
         # hotové žádosti se po 60 dnech mažou, ať soubor nerostne
         records = [r for r in records if not (r.get("done") and now - r.get("ts", 0) > 60 * 86400)]
         for r in records:
-            if r.get("email") == email and not r.get("done") and now - r.get("ts", 0) < REPEAT_AFTER:
+            if r.get("kind", "new") != kind or r.get("done"):
+                continue
+            if kind == "new" and r.get("email") == email and now - r.get("ts", 0) < REPEAT_AFTER:
+                return r, "duplicate"
+            if kind == "increase" and r.get("key_id") == key.get("id") and _is_open(r, now):
                 return r, "duplicate"
         if sum(1 for r in records if now - r.get("ts", 0) < 86400) >= MAX_REQUESTS_PER_DAY:
             return None, "full"
         token = secrets.token_urlsafe(32)
         rec = {
             "id": max((r.get("id", 0) for r in records), default=0) + 1,
+            "kind": kind,
             "email": email,
+            "devices": max(1, int(devices)),
+            "reason": clean_reason(reason),
             "ts": int(now),
             "done": False,
             "mailed": None,  # None = zatím se neposílalo, True/False = výsledek odeslání
             "token_hash": _hash_token(token),  # token samotný se neukládá, jen jeho otisk
         }
+        if key:
+            rec.update(key_id=key.get("id"), key_label=key.get("label", ""),
+                       current_devices=int(key.get("max_devices", 1)), used_devices=len(key.get("devices", [])))
         records.append(rec)
         _write(records)
     return {**rec, "token": token}, "ok"  # token je jen v paměti, pro odkazy v e-mailu
+
+
+def open_increase(key_id) -> dict:
+    """Čekající žádost o navýšení pro daný klíč (zobrazuje se v Nastavení), nebo None."""
+    now = time.time()
+    with _lock:
+        for r in _read():
+            if r.get("kind") == "increase" and r.get("key_id") == key_id and _is_open(r, now):
+                return r
+    return None
 
 
 def list_requests(only_open: bool = True) -> list:
@@ -149,8 +194,9 @@ def peek_request(rec_id: int, token: str):
     return None
 
 
-def resolve_request(rec_id: int, token: str, decision: str):
-    """Jednorázově vyřídí žádost (decision = "approved" nebo "denied"). Druhé použití stejného odkazu vrátí None."""
+def resolve_request(rec_id: int, token: str, decision: str, devices: int = None):
+    """Jednorázově vyřídí žádost (decision = "approved" nebo "denied"); u schválení se uloží počet zařízení,
+    který provozovatel potvrdil. Druhé použití stejného odkazu vrátí None."""
     with _lock:
         records = _read()
         for r in records:
@@ -158,6 +204,8 @@ def resolve_request(rec_id: int, token: str, decision: str):
                 r["done"] = True
                 r["decision"] = decision
                 r["token_hash"] = ""
+                if decision == "approved" and devices:
+                    r["approved_devices"] = int(devices)
                 _write(records)
                 return r
     return None
@@ -172,44 +220,69 @@ def _mark_mailed(rec_id: int, ok: bool):
         _write(records)
 
 
+def manual_command(rec: dict) -> str:
+    """Příkaz pro vyřízení žádosti bez odkazu z e-mailu."""
+    devices = requested_devices(rec)
+    if rec.get("kind") == "increase":
+        return f"sudo lumenkeys devices {rec.get('key_id')} {devices} --request {rec['id']}"
+    return f"sudo lumenkeys add \"{rec['email']}\" --devices {devices} --request {rec['id']}"
+
+
 def build_mail(rec: dict) -> EmailMessage:
     email = rec["email"]
+    increase = rec.get("kind") == "increase"
+    devices = requested_devices(rec)
     when = time.strftime("%d.%m.%Y %H:%M", time.localtime(rec["ts"]))
     msg = EmailMessage()
-    msg["Subject"] = f"Lumen: žádost o klíč od {email}"
+    msg["Subject"] = (f"Lumen: žádost o víc zařízení ({devices}) od {email}" if increase
+                      else f"Lumen: žádost o klíč od {email}")
     msg["From"] = MAIL_FROM
     msg["To"] = REQUEST_TO
     msg["Reply-To"] = email  # odpověď jde rovnou žadateli
     msg["Date"] = formatdate(localtime=True)
     msg["Message-ID"] = make_msgid(domain="lumen.local")
-    head = (
-        f"Někdo si na Lumenu žádá o přístupový klíč.\n"
-        f"\n"
-        f"E-mail žadatele: {email}\n"
-        f"Odesláno:        {when}\n"
-        f"Číslo žádosti:   {rec['id']}\n"
-        f"\n"
-    )
+    if increase:
+        head = (
+            f"Někdo s klíčem na Lumenu žádá o navýšení počtu zařízení.\n"
+            f"\n"
+            f"E-mail žadatele: {email}\n"
+            f"Klíč:            č. {rec.get('key_id')} „{rec.get('key_label', '')}“, teď {rec.get('current_devices', 1)} zař."
+            f" (obsazeno {rec.get('used_devices', 0)})\n"
+            f"Žádá o:          {devices} zař.\n"
+        )
+    else:
+        head = (
+            f"Někdo si na Lumenu žádá o přístupový klíč.\n"
+            f"\n"
+            f"E-mail žadatele: {email}\n"
+            f"Počet zařízení:  {devices}\n"
+        )
+    head += f"Odesláno:        {when}\nČíslo žádosti:   {rec['id']}\n"
+    if rec.get("reason"):
+        head += "\nDůvod:\n" + "\n".join("  " + line for line in rec["reason"].splitlines()) + "\n"
+    head += "\n"
     token = rec.get("token")
     if PUBLIC_URL and token:
         base = f"{PUBLIC_URL}/api/key/approve?id={rec['id']}&t={token}"
+        what = ("navýšení se hned projeví a žadateli přijde e-mail" if increase
+                else "klíč se vytvoří a sám se pošle žadateli")
         body = (
-            f"SCHVÁLIT (klíč se vytvoří a sám se pošle žadateli):\n"
+            f"SCHVÁLIT ({what}):\n"
             f"{base}\n"
             f"\n"
-            f"Na stránce, která se otevře, ještě potvrdíš tlačítkem. Odkaz platí 14 dní a jde použít jednou.\n"
+            f"Na stránce, která se otevře, můžeš počet zařízení upravit a potvrdíš tlačítkem. Odkaz platí 14 dní a jde použít jednou.\n"
             f"Zamítnout můžeš na stejné stránce. Když nic neuděláš, žádost jen čeká.\n"
             f"\n"
-            f"Ručně (bez odkazu): sudo lumenkeys add \"{email}\" --request {rec['id']}\n"
+            f"Ručně (bez odkazu): {manual_command(rec)}\n"
         )
     else:
         body = (
-            f"1) Na serveru vytvoř klíč (a žádost se zároveň označí jako vyřízená):\n"
+            f"1) Na serveru žádost vyřiď (a zároveň se označí jako vyřízená):\n"
             f"\n"
-            f"    sudo lumenkeys add \"{email}\" --request {rec['id']}\n"
+            f"    {manual_command(rec)}\n"
             f"\n"
             f"2) Klikni na Odpovědět. Tahle zpráva má Reply-To nastavený na adresu žadatele, takže odpověď jde\n"
-            f"   rovnou jemu. Vlož do ní klíč.\n"
+            f"   rovnou jemu.{'' if increase else ' Vlož do ní klíč.'}\n"
             f"\n"
             f"(Odkaz pro schválení jedním kliknutím se objeví po nastavení PUBLIC_URL v /etc/lumen.env.)\n"
         )
@@ -217,7 +290,40 @@ def build_mail(rec: dict) -> EmailMessage:
     return msg
 
 
-def build_key_mail(email: str, key: str) -> EmailMessage:
+def _devices_text(devices: int) -> str:
+    if devices == 1:
+        return "Klíč se přiřadí k zařízení, kde ho zadáš jako první, a na jiném zařízení nebude fungovat."
+    return (f"Klíč platí na {devices} zařízeních: přiřadí se postupně k prvním {devices} zařízením (prohlížečům), "
+            f"kde ho zadáš, a na dalších už fungovat nebude.")
+
+
+def build_devices_mail(email: str, devices: int) -> EmailMessage:
+    """E-mail žadateli o schváleném navýšení počtu zařízení."""
+    msg = EmailMessage()
+    msg["Subject"] = f"Lumen: tvůj klíč teď platí na {devices} zařízení"
+    msg["From"] = MAIL_FROM
+    msg["To"] = email
+    msg["Reply-To"] = REQUEST_TO
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain="lumen.local")
+    msg.set_content(
+        f"Ahoj,\n"
+        f"\n"
+        f"tvoje žádost o víc zařízení byla schválena. Tvůj přístupový klíč teď platí na {devices} zařízení.\n"
+        f"\n"
+        f"Na novém zařízení otevři Lumen, jdi do Nastavení a v části Přístup zadej stejný klíč jako dosud.\n"
+        f"Zařízení, kde klíč už používáš, zůstávají beze změny.\n"
+    )
+    return msg
+
+
+def send_devices_mail(email: str, devices: int):
+    if not mail_configured():
+        raise RuntimeError("Není nastavený SMTP_USER a SMTP_PASSWORD.")
+    _send(build_devices_mail(email, devices))
+
+
+def build_key_mail(email: str, key: str, devices: int = 1) -> EmailMessage:
     """E-mail žadateli s vystaveným klíčem. Odpověď na něj jde provozovateli."""
     msg = EmailMessage()
     msg["Subject"] = "Tvůj přístupový klíč pro Lumen"
@@ -237,18 +343,18 @@ def build_key_mail(email: str, key: str) -> EmailMessage:
         f"\n"
         f"{where}\n"
         f"\n"
-        f"Klíč se přiřadí k zařízení, kde ho zadáš jako první, a na jiném zařízení nebude fungovat. "
+        f"{_devices_text(devices)} "
         f"Nikomu ho proto neposílej. Kdyby sis měnil telefon nebo prohlížeč, odpověz na tenhle e-mail "
-        f"a klíč ti uvolním.\n"
+        f"a klíč ti uvolním. O víc zařízení požádáš v Nastavení → Přístup.\n"
     )
     return msg
 
 
-def send_key_mail(email: str, key: str):
+def send_key_mail(email: str, key: str, devices: int = 1):
     """Pošle žadateli klíč. Při chybě vyvolá výjimku (volající ukáže klíč provozovateli, ať ho pošle ručně)."""
     if not mail_configured():
         raise RuntimeError("Není nastavený SMTP_USER a SMTP_PASSWORD.")
-    _send(build_key_mail(email, key))
+    _send(build_key_mail(email, key, devices))
 
 
 def _send(msg: EmailMessage):

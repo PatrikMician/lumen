@@ -342,7 +342,8 @@ select:disabled { opacity: .5; }
   }
   .brand { display: none; }
   .rail-links { flex-direction: row; width: 100%; justify-content: space-around; }
-  .rail-links a { flex-direction: column; gap: 2px; padding: 6px 12px; font-size: 12px; }
+  .rail-links a { flex-direction: column; gap: 2px; padding: 6px 2px; font-size: 11px; flex: 1 1 0; min-width: 0; }
+  .rail-links a span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   main { padding: 28px 16px 160px; align-content: start; padding-top: 12vh; }
   .preview { grid-template-columns: 1fr; }
   .fab { bottom: 84px; right: 16px; }
@@ -394,3 +395,172 @@ select:disabled { opacity: .5; }
 .request-sent p { margin: 0; font-size: .92rem; line-height: 1.5; }
 .request-sent strong { overflow-wrap: anywhere; }
 @media (max-width: 640px) { .request-sent { max-width: none; width: 100%; } }
+
+/* Počet zařízení a důvod u žádosti o klíč */
+.devices-field { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); }
+.devices-field select { min-width: 72px; }
+.key-form .plain-input.area {
+  flex: 1 1 100%; width: 100%;
+  border-radius: 14px; resize: vertical; min-height: 46px;
+  font-family: inherit; letter-spacing: normal; text-transform: none; line-height: 1.45;
+}
+
+/* ---------- Hudba ---------- */
+main > .view.music-view { max-width: 1040px; min-width: 0; }
+/* řady karet se posouvají do strany uvnitř stránky, stránka sama se nesmí rozšířit */
+main:has(.music-view.active) { align-content: start; padding-top: 40px; grid-template-columns: minmax(0, 1fr); }
+.m-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; margin-bottom: 18px; }
+.m-head .title { margin: 0; }
+#mSearchForm { margin-bottom: 14px; }
+
+.m-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
+.m-filters button { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 6px 14px; font-size: 14px; }
+.m-filters button:hover { color: var(--text); }
+.m-filters button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+
+.m-locked { padding: 22px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface); display: flex; flex-direction: column; gap: 8px; }
+.m-locked-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+.m-locked .btn { text-decoration: none; }
+.m-loading { padding: 32px 4px; }
+.m-error { padding: 24px 0; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; color: var(--danger); }
+
+.m-shelf { margin-top: 8px; }
+.m-shelf .group { margin: 26px 0 12px; }
+.m-row { display: grid; grid-auto-flow: column; grid-auto-columns: 168px; gap: 16px; min-width: 0; overflow-x: auto; padding-bottom: 10px; scroll-snap-type: x proximity; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.m-row > * { scroll-snap-align: start; }
+.m-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 18px 16px; margin-top: 14px; }
+.m-card { display: flex; flex-direction: column; gap: 4px; min-width: 0; text-decoration: none; color: var(--text); }
+.m-card-cover { position: relative; display: grid; place-items: center; aspect-ratio: 1; border-radius: 14px; overflow: hidden; background: var(--surface-2); color: var(--muted); }
+.m-card.m-video .m-card-cover { aspect-ratio: 16 / 9; }
+.m-card.m-artist .m-card-cover { border-radius: 50%; }
+.m-card-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.m-card-play { position: absolute; right: 10px; bottom: 10px; width: 40px; height: 40px; padding: 10px; border-radius: 50%; background: var(--accent); color: var(--on-accent); opacity: 0; transform: translateY(6px); transition: opacity .15s, transform .15s; }
+.m-card:hover .m-card-play, .m-card:focus-visible .m-card-play { opacity: 1; transform: none; }
+.m-card-title { font-weight: 600; font-size: 15px; line-height: 1.3; margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.m-card-sub { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-card.m-artist { text-align: center; }
+
+.m-tracks { list-style: none; margin: 0; padding: 0; }
+.m-track { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 4px 6px; border-radius: 12px; }
+.m-track:hover { background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
+.m-track-main { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 4px 0; border: 0; background: none; text-align: left; color: inherit; }
+.m-track-thumb { position: relative; flex: none; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 8px; overflow: hidden; background: var(--surface-2); color: var(--muted); }
+.m-track-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.m-track-no { font-size: 14px; font-variant-numeric: tabular-nums; }
+.m-track-hover { position: absolute; inset: 0; margin: auto; width: 22px; height: 22px; color: #fff; opacity: 0; z-index: 1; }
+.m-track-thumb::after { content: ""; position: absolute; inset: 0; background: rgba(0, 0, 0, .45); opacity: 0; }
+.m-track-main:hover .m-track-thumb::after, .m-track-main:focus-visible .m-track-thumb::after { opacity: 1; }
+.m-track-main:hover .m-track-hover, .m-track-main:focus-visible .m-track-hover { opacity: 1; }
+.m-track-text { display: flex; flex-direction: column; min-width: 0; }
+.m-track-title { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-track-sub { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-track.now .m-track-title { color: var(--accent); }
+.m-track.past { opacity: .55; }
+.m-track-dur { font-variant-numeric: tabular-nums; }
+.m-track-actions { display: flex; gap: 10px; opacity: 0; transition: opacity .15s; }
+.m-track:hover .m-track-actions, .m-track:focus-within .m-track-actions { opacity: 1; }
+@media (hover: none) { .m-track-actions { opacity: 1; } }
+
+.m-back { display: inline-flex; align-items: center; gap: 4px; margin: 4px 0 14px; text-decoration: none; }
+.m-back .ico { width: 18px; height: 18px; }
+.m-detail-head { display: grid; grid-template-columns: 200px 1fr; gap: 24px; align-items: end; }
+.m-detail-cover { position: relative; display: grid; place-items: center; aspect-ratio: 1; border-radius: 18px; overflow: hidden; background: var(--surface-2); color: var(--muted); box-shadow: 0 10px 36px rgba(0, 0, 0, .28); }
+.m-detail-head.artist .m-detail-cover { border-radius: 50%; }
+.m-detail-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.m-detail-info { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.m-detail-kind { text-transform: uppercase; letter-spacing: .08em; }
+.m-detail-title { font: 500 clamp(30px, 5vw, 46px)/1.08 var(--font-display); letter-spacing: -.02em; overflow-wrap: anywhere; }
+.m-detail-btns { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.m-detail-btns .btn, .m-local-actions .btn, .small-btn { display: inline-flex; align-items: center; gap: 8px; }
+.m-detail-btns .ico, .small-btn .ico, .m-local-actions .ico { width: 18px; height: 18px; }
+.m-desc { margin-top: 18px; max-width: 72ch; white-space: pre-line; }
+.m-more { display: inline-block; margin: 8px 6px; }
+
+.m-local-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+.m-file-btn { position: relative; overflow: hidden; cursor: pointer; }
+.m-file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.m-local-note { margin-bottom: 18px; max-width: 64ch; }
+.m-local-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 0 10px; }
+.m-local-bar .muted { margin-right: auto; }
+.small-btn { padding: 8px 16px; font-size: 14px; }
+
+/* Lišta přehrávače */
+.m-bar {
+  position: fixed; z-index: 25; left: var(--rail); right: 0; bottom: 0;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr); align-items: center; gap: 16px;
+  padding: 12px 20px 12px 16px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  border-top: 1px solid var(--line);
+  backdrop-filter: blur(14px);
+}
+.m-seek {
+  position: absolute; left: 0; right: 0; top: -7px; width: 100%; height: 14px; margin: 0;
+  -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer;
+}
+.m-seek::-webkit-slider-runnable-track { height: 3px; background: linear-gradient(to right, var(--accent) var(--p, 0%), var(--line) var(--p, 0%)); border-radius: 999px; }
+.m-seek::-moz-range-track { height: 3px; background: linear-gradient(to right, var(--accent) var(--p, 0%), var(--line) var(--p, 0%)); border-radius: 999px; }
+.m-seek::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4.5px; border-radius: 50%; background: var(--accent); opacity: 0; transition: opacity .15s; }
+.m-seek::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: var(--accent); opacity: 0; }
+.m-bar:hover .m-seek::-webkit-slider-thumb, .m-seek:focus-visible::-webkit-slider-thumb { opacity: 1; }
+.m-bar:hover .m-seek::-moz-range-thumb { opacity: 1; }
+.m-now { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.m-cover { position: relative; flex: none; display: grid; place-items: center; width: 52px; height: 52px; border-radius: 10px; overflow: hidden; background: var(--surface-2); color: var(--muted); }
+.m-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.m-meta { min-width: 0; }
+.m-title { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-artist { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-ctrl { display: flex; align-items: center; gap: 4px; }
+.m-play { display: grid; place-items: center; width: 46px; height: 46px; border: 0; border-radius: 50%; background: var(--text); color: var(--bg); margin: 0 4px; }
+.m-play .ico { width: 24px; height: 24px; }
+.m-play:hover { transform: scale(1.04); }
+.m-toggle { position: relative; }
+.m-toggle.on { color: var(--accent); }
+.m-toggle.on::after { content: ""; position: absolute; bottom: 4px; left: 50%; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--accent); }
+.m-one { position: absolute; top: 7px; right: 7px; font-size: 9px; font-weight: 800; color: var(--accent); }
+.m-side { display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 0; }
+.m-time { font-variant-numeric: tabular-nums; white-space: nowrap; margin-right: 6px; }
+.m-volume { display: flex; align-items: center; gap: 6px; color: var(--muted); margin: 0 4px; }
+.m-volume input { width: 92px; accent-color: var(--accent); }
+
+/* Fronta skladeb a text písně */
+.m-queue { z-index: 32; }
+.m-automix { padding: 8px 22px 12px; }
+.m-queue-list { flex: 1; overflow-y: auto; padding: 4px 10px; }
+.m-queue-list .m-track-actions { opacity: 1; }
+.m-lyrics { width: min(560px, 94vw); }
+.m-lyrics-body { padding: 18px 22px 22px; max-height: 70vh; overflow-y: auto; }
+#mLyricsText { white-space: pre-line; line-height: 1.7; font-size: 16px; }
+#mLyricsSource { margin-top: 18px; }
+
+/* Když hraje hudba, tlačítko fronty a hlášky se posunou nad lištu */
+body.m-active main { padding-bottom: 190px; }
+body.m-active .fab { bottom: 98px; }
+body.m-active .toast { bottom: 100px; }
+
+@media (max-width: 1180px) {
+  .m-volume input { width: 64px; }
+  .m-time { display: none; }
+}
+@media (max-width: 980px) {
+  .m-volume { display: none; }
+}
+@media (max-width: 760px) {
+  main:has(.music-view.active) { padding-top: 24px; }
+  .m-bar { left: 0; bottom: 68px; grid-template-columns: minmax(0, 1fr) auto auto; padding: 10px 6px 10px 12px; gap: 4px; }
+  .m-ctrl #mShuffle, .m-ctrl #mRepeat, .m-ctrl #mPrev { display: none; }
+  .m-side { gap: 0; }
+  .m-side #mLyricsBtn, .m-side #mDownload { display: none !important; }
+  .m-cover { width: 44px; height: 44px; }
+  .m-play { width: 42px; height: 42px; }
+  .m-bar .m-ctrl { gap: 0; }
+  body.m-active .fab { bottom: 152px; }
+  body.m-active .toast { bottom: 156px; }
+  body.m-active main { padding-bottom: 240px; }
+  .m-detail-head { grid-template-columns: 1fr; }
+  .m-detail-cover { width: min(240px, 70vw); }
+  .m-row { grid-auto-columns: 140px; }
+  .m-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+  .m-track { grid-template-columns: minmax(0, 1fr) auto; row-gap: 0; }
+  .m-track-actions { grid-column: 1 / -1; padding: 0 0 6px 58px; opacity: 1; gap: 16px; }
+  .m-track-actions:empty { display: none; }
+}

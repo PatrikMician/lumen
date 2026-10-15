@@ -63,6 +63,17 @@ if ! cmp -s deploy/lumen.service /etc/systemd/system/lumen.service; then
   Log "Soubor služby aktualizován"
 fi
 systemctl enable lumen >/dev/null 2>&1 || true
+
+# Noční aktualizace yt-dlp (timer + jednorázová služba)
+TIMER_CHANGED=0
+for unit in lumen-ytdlp.service lumen-ytdlp.timer; do
+  if ! cmp -s "deploy/$unit" "/etc/systemd/system/$unit"; then
+    install -m 644 "deploy/$unit" "/etc/systemd/system/$unit"
+    TIMER_CHANGED=1
+  fi
+done
+(( TIMER_CHANGED == 0 )) || { systemctl daemon-reload; Log "Noční aktualizace yt-dlp nastavena"; }
+systemctl enable --now lumen-ytdlp.timer >/dev/null 2>&1 || Warn "Timer lumen-ytdlp se nepodařilo zapnout: sudo systemctl status lumen-ytdlp.timer"
 Log "Restartuji Lumen…"
 systemctl restart lumen
 
@@ -71,4 +82,4 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 curl -fs "http://127.0.0.1:8000/api/health" >/dev/null 2>&1 || Fail "Lumen nenaběhl. Logy: sudo journalctl -u lumen -n 30 --no-pager"
-Ok "Lumen běží ($(As git rev-parse --short HEAD 2>/dev/null || echo bez-gitu))"
+Ok "Lumen běží ($(As git rev-parse --short HEAD 2>/dev/null || echo bez-gitu)), další aktualizace yt-dlp: $(systemctl show lumen-ytdlp.timer -p NextElapseUSecRealtime --value 2>/dev/null || echo ?)"

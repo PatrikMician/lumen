@@ -3,7 +3,7 @@
 Malá webová aplikace na stahování videí a hudby (YouTube, SoundCloud a stovky dalších webů).
 Backend je FastAPI nad `yt-dlp` a `ffmpeg`, frontend je čisté HTML/CSS/JS bez build kroku.
 
-Funkce: načtení náhledu odkazu, režimy auto / video / audio, výběr kvality a formátu (MP4, MKV, WebM, MP3, M4A, Opus, FLAC, WAV), fronta s průběhem a historií, převod nahraného souboru přes ffmpeg, seznam podporovaných webů, světlý/tmavý motiv a barva zvýraznění.
+Funkce: načtení náhledu odkazu, režimy auto / video / audio, výběr kvality a formátu (MP4, MKV, WebM, MP3, M4A, Opus, FLAC, WAV), fronta s průběhem a historií, převod nahraného souboru přes ffmpeg, hudební přehrávač (online katalog i hudba ze zařízení), seznam podporovaných webů, světlý/tmavý motiv a barva zvýraznění.
 
 ## Co potřebuješ
 
@@ -71,7 +71,14 @@ Důležité: **aplikace je bez hesla otevřená komukoliv, kdo zná adresu.** Na
 | `MAX_REQUESTS_PER_DAY` | `50` | Kolik žádostí o klíč smí za den přijít celkem. |
 | `IMPERSONATE` | `chrome` | Napodobení prohlížeče (knihovna `curl-cffi`) pro weby, které jinak vrací chybu 403. Na YouTube se nepoužívá. Prázdné = vypnuto. |
 | `PUBLIC_URL` | prázdné | Veřejná adresa Lumenu (např. `https://lumen.mican.dpdns.org`). Podle ní se tvoří odkaz „Schválit“ v e-mailu o žádosti. |
-| `APPROVE_DEVICES` | `1` | Na kolik zařízení platí klíč vystavený schválením žádosti. |
+| `APPROVE_DEVICES` | `1` | Počet zařízení u starších žádostí, které ho ještě neuváděly. Nové žádosti nesou počet zvolený žadatelem. |
+| `MAX_REQUEST_DEVICES` | `5` | O kolik zařízení si jde říct z webu (u nového klíče i u navýšení). |
+| `MAX_DEVICES` | `20` | Kolik zařízení můžeš povolit na schvalovací stránce. |
+| `MUSIC` | `1` | `0` vypne online hudbu (hudba ze zařízení funguje dál, ta server nezatěžuje). |
+| `MUSIC_REQUIRE_KEY` | `1` | Online hudba jen pro návštěvníky s přístupovým klíčem (když je zapnutý `DAILY_LIMIT`). |
+| `MUSIC_LOCATION` | `CZ` | Země pro hudební katalog (domovská stránka, žebříčky). |
+| `MUSIC_BROWSE_PER_HOUR` | `300` | Dotazů do hudebního katalogu na prohlížeč za hodinu. |
+| `MUSIC_TRACKS_PER_HOUR` | `120` | Spuštěných skladeb na prohlížeč za hodinu. |
 
 ### Varianta A: Docker
 ```
@@ -103,6 +110,7 @@ Přístupový klíč limit odstraní. Návštěvník ho vloží v **Nastavení �
 .venv/bin/python keys.py add "Honza"              # klíč pro 1 zařízení, vypíše se jen jednou
 .venv/bin/python keys.py add "Honza" --devices 2  # klíč pro 2 zařízení (třeba telefon a počítač)
 .venv/bin/python keys.py list                     # seznam klíčů a obsazená zařízení
+.venv/bin/python keys.py devices 2 3              # klíč č. 2 bude platit na 3 zařízení
 .venv/bin/python keys.py reset 2                  # uvolní zařízení klíče č. 2 (nový telefon, smazané cookies)
 .venv/bin/python keys.py revoke 2                 # zruší klíč č. 2 úplně
 ```
@@ -111,19 +119,22 @@ Zařízení se pozná podle cookie v prohlížeči. Když ji uživatel smaže, n
 
 #### Žádost o klíč z webu
 
-V **Nastavení → Přístup** může návštěvník bez klíče zadat svůj e-mail a kliknout na **Požádat o klíč**. Žádost se uloží do `data/requests.json` a tobě přijde e-mail (z `SMTP_USER` na `REQUEST_TO`) s odkazem **Schválit**.
+V **Nastavení → Přístup** může návštěvník bez klíče zadat svůj e-mail, vybrat **počet zařízení** (1 až `MAX_REQUEST_DEVICES`), případně napsat důvod, a kliknout na **Požádat o klíč**. Žádost se uloží do `data/requests.json` a tobě přijde e-mail (z `SMTP_USER` na `REQUEST_TO`) s počtem zařízení, důvodem a odkazem **Schválit**.
 
-1. Klikneš na odkaz v e-mailu. Otevře se stránka Lumenu a na ní potvrdíš tlačítkem **Schválit a poslat klíč** (nebo **Zamítnout**). Potvrzení je zvlášť, aby žádost nespustil e-mailový skener odkazů.
-2. Aplikace vytvoří klíč (na `APPROVE_DEVICES` zařízení, výchozí 1) a pošle ho e-mailem žadateli. Odpověď žadatele na ten e-mail jde tobě.
+1. Klikneš na odkaz v e-mailu. Otevře se stránka Lumenu s žádostí. **Počet zařízení můžeš před schválením upravit** a potvrdíš tlačítkem **Schválit a poslat klíč** (nebo **Zamítnout**). Potvrzení je zvlášť, aby žádost nespustil e-mailový skener odkazů.
+2. Aplikace vytvoří klíč na potvrzený počet zařízení a pošle ho e-mailem žadateli. Odpověď žadatele na ten e-mail jde tobě.
 3. Kdyby odeslání žadateli selhalo, ukáže se klíč na té samé stránce a pošleš ho sám.
+
+**Víc zařízení později.** Kdo už klíč má, uvidí v **Nastavení → Přístup** blok **Víc zařízení**: vybere nový počet, napíše důvod (povinný) a svůj e-mail. Tobě přijde e-mail s odkazem, na stránce vidíš klíč, kolik zařízení má teď a kolik obsazených, a počet schválíš nebo upravíš. Navýšení platí hned a žadateli přijde e-mail. Pod počet už obsazených zařízení jít nejde (k tomu je `reset`). Pro jeden klíč čeká nejvýš jedna žádost o navýšení.
 
 Odkaz je na jedno použití, platí 14 dní a obsahuje dlouhý náhodný token (v `requests.json` je jen jeho otisk). Aplikace neposílá nic nikomu, dokud žádost sám neschválíš, takže se nedá zneužít k rozesílání spamu. Proti zneužití formuláře je navíc limit 3 žádosti na návštěvníka za den, `MAX_REQUESTS_PER_DAY` celkem a skryté pole proti robotům. Žádost zadanou z té samé adresy do 24 hodin aplikace nepošle znovu.
 
 Bez nastaveného `PUBLIC_URL` e-mail odkaz neobsahuje a žádost vyřídíš ručně:
 
 ```
-lumenkeys requests                          # čekající žádosti
-lumenkeys add "jan@seznam.cz" --request 3   # vytvoří klíč a označí žádost č. 3 jako vyřízenou
+lumenkeys requests                          # čekající žádosti (nový klíč / víc zařízení, počet, důvod, příkaz k vyřízení)
+lumenkeys add "jan@seznam.cz" --request 3   # vytvoří klíč na počet zařízení ze žádosti č. 3 a označí ji jako vyřízenou
+lumenkeys devices 5 3 --request 4           # navýšení: klíč č. 5 na 3 zařízení a žádost č. 4 vyřízená
 ```
 
 Pak v e-mailu klikneš na Odpovědět (jde rovnou žadateli) a vložíš klíč. `lumenkeys requests done 3` označí žádost jako vyřízenou bez vytváření klíče.
@@ -134,14 +145,37 @@ V souboru `data/keys.json` jsou jen otisky klíčů, takže ztracený klíč nej
 
 Pozor: s nastaveným `AUTH_PASSWORD` si web zamkne heslem úplně celý (i návštěvníky s klíčem). Pro veřejný web s limitem nech `AUTH_PASSWORD` prázdné.
 
+### Hudba
+
+Záložka **Hudba** má dva zdroje:
+
+- **Online**: domovská stránka (rychlý výběr, hity, novinky), hledání skladeb, alb, interpretů, playlistů a videí, stránky alb, interpretů a playlistů, rádio interpreta, text písně a **Automix** (když fronta dohraje, přidá podobné skladby). Do hledání jde vložit i odkaz z YouTube Music nebo YouTube. Katalog čte knihovna `ytmusicapi` bez přihlášení, zvuk vybírá yt-dlp (m4a, hraje i Safari) a server ho proudem přeposílá jako náhled videa. Každou skladbu jde **stáhnout** jako zvuk (počítá se jako běžné stažení). Ve výchozím stavu je online hudba jen pro návštěvníky s přístupovým klíčem (`MUSIC_REQUIRE_KEY`), aby starý server nezahltil kdokoliv z internetu.
+- **V zařízení**: návštěvník vybere složku s hudbou (Chrome a Edge si ji zapamatují, po restartu prohlížeče stačí potvrdit **Znovu otevřít**) nebo přidá soubory. Soubory se nikam neposílají, hrají přímo z jeho disku, takže funguje i bez klíče. U souborů stažených Lumenem se z názvu odřízne `[id]` a „Interpret - Název“ se rozdělí.
+
+Přehrávač má frontu, náhodné pořadí, opakování (vše / jedna skladba), hlasitost a ovládání ze zamčené obrazovky a mediálních kláves (Media Session). Online hudba zatěžuje server i síť a zvyšuje riziko, že YouTube IP serveru dočasně omezí (chyba E110), proto jsou na ni limity `MUSIC_BROWSE_PER_HOUR` a `MUSIC_TRACKS_PER_HOUR`.
+
+Pozor: `ytmusicapi` s jazykem `cs` ve filtrovaném hledání nic nenajde (počítá s anglickými popisky), proto se nastavuje jen země (`MUSIC_LOCATION`).
+
+### Noční aktualizace yt-dlp
+
+`update.sh` nainstaluje systemd timer `lumen-ytdlp.timer`, který každou noc mezi 4:00 a 4:30 spustí `deploy/ytdlp-update.sh`. Ten aktualizuje yt-dlp v `.venv`, a když se verze změní, počká, až Lumen nemá rozdělané stahování (nejvýš 30 minut, podle `active` v `/api/health`), a službu restartuje. Když server v tu dobu neběžel, aktualizace proběhne po startu.
+
+```
+systemctl list-timers lumen-ytdlp.timer      # kdy poběží příště
+journalctl -u lumen-ytdlp -n 20 --no-pager   # výsledek posledních běhů
+sudo systemctl start lumen-ytdlp             # aktualizovat hned
+```
+
 ### Pozor na YouTube ze serveru
 YouTube často blokuje IP adresy datacenter (VPS) a chce po nich přihlášení. Když na serveru stahování z YouTube selhává a doma funguje, pomůže exportovat cookies z prohlížeče (rozšíření typu "Get cookies.txt LOCALLY"), nahrát soubor na server a nastavit `COOKIES_FILE=/cesta/k/cookies.txt`. Cookies jsou citlivé, jako heslo k účtu, takže soubor nikam nesdílej. Doma na vlastním počítači tenhle problém obvykle není.
 
 ## Struktura
 
 ```
-backend/main.py     API: info, stahování, převod, fronta, weby
-static/             frontend (index.html, style.css, app.js)
+backend/main.py     API: info, stahování, převod, fronta, weby, klíče a žádosti
+backend/music.py    API hudby: katalog (ytmusicapi) a přehrávání zvuku přes server
+static/             frontend (index.html, style.css, app.js, music.js)
+deploy/             systemd služba, noční aktualizace yt-dlp (timer + skript), lumenkeys
 run.py              spuštění serveru
 start.bat/.sh       instalace a spuštění jedním příkazem
 Dockerfile, docker-compose.yml
@@ -177,7 +211,8 @@ Klíče spravuješ příkazem `lumenkeys` (nainstaluje ho `update.sh`):
 lumenkeys add "Honza"        # nový klíč na 1 zařízení
 lumenkeys add "Honza" --devices 2
 lumenkeys list
-lumenkeys requests         # čekající žádosti o klíč z webu
+lumenkeys requests         # čekající žádosti o klíč a o víc zařízení z webu
+lumenkeys devices 2 3        # klíč č. 2 bude platit na 3 zařízení
 lumenkeys reset 2            # uvolní zařízení klíče č. 2
 lumenkeys revoke 2           # zruší klíč č. 2
 ```

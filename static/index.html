@@ -16,7 +16,7 @@
       document.documentElement.dataset.accent = s.accent || "amber";
     } catch (e) {}
   </script>
-  <link rel="stylesheet" href="/style.css?v=6">
+  <link rel="stylesheet" href="/style.css?v=10">
 </head>
 <body>
 
@@ -31,6 +31,18 @@
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V5M7 9l5-5 5 5M5 20h14"/></symbol>
   <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M6 6l9 6-9 6z" fill="currentColor" stroke="none"/><path d="M18 6v12"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M18 6l-9 6 9 6z" fill="currentColor" stroke="none"/><path d="M6 6v12"/></symbol>
+  <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M4 7h3.5c2 0 3.2 1 4.3 2.7l2.4 4.6C15.3 16 16.5 17 18.5 17H20M17 14l3 3-3 3M4 17h3.5c1.3 0 2.2-.4 3-1.2M14.6 8.2c.9-.8 1.8-1.2 3.9-1.2H20M17 4l3 3-3 3"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M17 3l3 3-3 3M20 6H8a4 4 0 00-4 4v1M7 21l-3-3 3-3M4 18h12a4 4 0 004-4v-1"/></symbol>
+  <symbol id="i-queue" viewBox="0 0 24 24"><path d="M4 6h12M4 11h12M4 16h7M15 15.5v-5l5 2.5z"/></symbol>
+  <symbol id="i-lyrics" viewBox="0 0 24 24"><path d="M5 5h14v10H9l-4 4z"/><path d="M9 9h6M9 12h4"/></symbol>
+  <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7a2 2 0 012-2h4l2 2.5h7a2 2 0 012 2V17a2 2 0 01-2 2h-13a2 2 0 01-2-2z"/></symbol>
 </svg>
 
 <div class="glow" id="glow" aria-hidden="true"><img id="glowImg" alt="" referrerpolicy="no-referrer"></div>
@@ -39,6 +51,7 @@
   <a class="brand" href="#/">lumen</a>
   <div class="rail-links">
     <a href="#/" data-route="download"><svg class="ico"><use href="#i-download"/></svg><span>Stáhnout</span></a>
+    <a href="#/music" data-route="music"><svg class="ico"><use href="#i-music"/></svg><span>Hudba</span></a>
     <a href="#/remux" data-route="remux"><svg class="ico"><use href="#i-convert"/></svg><span>Převod</span></a>
     <a href="#/sites" data-route="sites"><svg class="ico"><use href="#i-globe"/></svg><span>Weby</span></a>
     <a href="#/settings" data-route="settings"><svg class="ico"><use href="#i-sliders"/></svg><span>Nastavení</span></a>
@@ -85,6 +98,59 @@
         <button type="button" id="dlBtn" class="btn primary">Stáhnout</button>
       </div>
     </article>
+  </section>
+
+  <!-- Hudba -->
+  <section class="view music-view" data-view="music" aria-labelledby="h-music">
+    <div class="m-head">
+      <h1 class="title" id="h-music">Hudba</h1>
+      <div class="seg" role="radiogroup" aria-label="Odkud hudba hraje">
+        <label><input type="radio" name="msrc" value="online"><span>Online</span></label>
+        <label><input type="radio" name="msrc" value="local"><span>V zařízení</span></label>
+      </div>
+    </div>
+
+    <div id="mOnline">
+      <form id="mSearchForm" class="pill" role="search" autocomplete="off">
+        <input id="mQuery" type="search" spellcheck="false" placeholder="Hledej skladby, alba a interprety, nebo vlož odkaz" aria-label="Hledat hudbu">
+        <button type="submit" class="btn primary">Hledat</button>
+      </form>
+      <div id="mFilters" class="m-filters" role="tablist" aria-label="Druh výsledků" hidden>
+        <button type="button" data-type="all" role="tab">Vše</button>
+        <button type="button" data-type="songs" role="tab">Skladby</button>
+        <button type="button" data-type="albums" role="tab">Alba</button>
+        <button type="button" data-type="artists" role="tab">Interpreti</button>
+        <button type="button" data-type="playlists" role="tab">Playlisty</button>
+        <button type="button" data-type="videos" role="tab">Videa</button>
+      </div>
+      <div id="mLocked" class="m-locked" hidden>
+        <strong>Online hudba je jen s přístupovým klíčem</strong>
+        <p class="muted small">Starý domácí server by ji pro všechny neutáhl. Hudbu ze svého zařízení můžeš poslouchat i bez klíče.</p>
+        <div class="m-locked-actions">
+          <a class="btn primary" href="#/settings">Zadat nebo požádat o klíč</a>
+          <a class="btn" href="#/music/local">Hudba v zařízení</a>
+        </div>
+      </div>
+      <div id="mContent" class="m-content"></div>
+    </div>
+
+    <div id="mLocal" hidden>
+      <div class="m-local-actions">
+        <button type="button" id="mPickDir" class="btn primary"><svg class="ico"><use href="#i-folder"/></svg>Vybrat složku s hudbou</button>
+        <button type="button" id="mReconnect" class="btn" hidden></button>
+        <label class="btn m-file-btn"><input id="mFiles" type="file" accept="audio/*,.mp3,.m4a,.opus,.flac,.wav,.ogg,.aac" multiple>Přidat soubory</label>
+        <input id="mDirInput" type="file" webkitdirectory multiple hidden>
+      </div>
+      <p class="muted small m-local-note">Soubory se nikam neposílají, hrají přímo z tvého zařízení. Hodí se třeba složka, kam ukládáš hudbu stáhnutou Lumenem.</p>
+      <input id="mLocalFilter" class="plain-input" type="search" placeholder="Hledat ve skladbách" aria-label="Hledat ve skladbách v zařízení" hidden>
+      <div id="mLocalBar" class="m-local-bar" hidden>
+        <span id="mLocalCount" class="muted small"></span>
+        <button type="button" id="mLocalPlay" class="btn primary small-btn"><svg class="ico"><use href="#i-play"/></svg>Přehrát vše</button>
+        <button type="button" id="mLocalShuffle" class="btn small-btn"><svg class="ico"><use href="#i-shuffle"/></svg>Náhodně</button>
+        <button type="button" id="mLocalClear" class="link">Vyprázdnit seznam</button>
+      </div>
+      <ul id="mLocalList" class="m-tracks"></ul>
+    </div>
   </section>
 
   <!-- Převod -->
@@ -152,12 +218,30 @@
         </div>
         <form id="requestForm" class="key-form request-form" autocomplete="off" novalidate>
           <input id="requestEmail" class="plain-input" type="email" inputmode="email" spellcheck="false" autocapitalize="none" autocomplete="email" placeholder="tvuj@email.cz" aria-label="Tvůj e-mail">
+          <label class="devices-field"><span>Počet zařízení</span><select id="requestDevices" aria-label="Počet zařízení"></select></label>
+          <textarea id="requestReason" class="plain-input area" rows="2" maxlength="500" placeholder="Důvod (nepovinné, u víc zařízení se hodí: třeba telefon a počítač)" aria-label="Důvod žádosti"></textarea>
           <input id="requestWebsite" class="hp" type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
           <button type="submit" id="requestSubmit" class="btn primary">Požádat o klíč</button>
         </form>
         <div id="requestSent" class="request-sent" hidden>
           <p id="requestSentText"></p>
           <button type="button" id="requestAgain" class="btn">Zadat jiný e-mail</button>
+        </div>
+      </div>
+      <div class="setting key-setting" id="increaseSetting" hidden>
+        <div>
+          <strong>Víc zařízení</strong>
+          <p class="muted small" id="increaseHelp"></p>
+        </div>
+        <form id="increaseForm" class="key-form request-form" autocomplete="off" novalidate>
+          <input id="increaseEmail" class="plain-input" type="email" inputmode="email" spellcheck="false" autocapitalize="none" autocomplete="email" placeholder="tvuj@email.cz" aria-label="Tvůj e-mail pro odpověď">
+          <label class="devices-field"><span>Nový počet zařízení</span><select id="increaseDevices" aria-label="Nový počet zařízení"></select></label>
+          <textarea id="increaseReason" class="plain-input area" rows="2" maxlength="500" placeholder="Proč potřebuješ víc zařízení? (povinné)" aria-label="Důvod navýšení"></textarea>
+          <input id="increaseWebsite" class="hp" type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+          <button type="submit" id="increaseSubmit" class="btn primary">Požádat o navýšení</button>
+        </form>
+        <div id="increaseSent" class="request-sent" hidden>
+          <p id="increaseSentText"></p>
         </div>
       </div>
     </div>
@@ -235,9 +319,56 @@
   <div id="playerBox" class="player-box"></div>
 </dialog>
 
+<!-- Hudební přehrávač -->
+<div id="mBar" class="m-bar" role="region" aria-label="Přehrávač hudby" hidden>
+  <input id="mSeek" class="m-seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Pozice ve skladbě">
+  <div class="m-now">
+    <div class="m-cover"><img id="mCover" alt="" referrerpolicy="no-referrer" hidden><svg class="ico"><use href="#i-music"/></svg></div>
+    <div class="m-meta"><p id="mTitle" class="m-title"></p><p id="mArtist" class="m-artist"></p></div>
+  </div>
+  <div class="m-ctrl">
+    <button type="button" id="mShuffle" class="icon-btn m-toggle" aria-label="Náhodné pořadí" aria-pressed="false"><svg class="ico"><use href="#i-shuffle"/></svg></button>
+    <button type="button" id="mPrev" class="icon-btn" aria-label="Předchozí"><svg class="ico"><use href="#i-prev"/></svg></button>
+    <button type="button" id="mPlay" class="m-play" aria-label="Přehrát"><svg class="ico"><use href="#i-play"/></svg></button>
+    <button type="button" id="mNext" class="icon-btn" aria-label="Další"><svg class="ico"><use href="#i-next"/></svg></button>
+    <button type="button" id="mRepeat" class="icon-btn m-toggle" aria-label="Opakovat: vypnuto" aria-pressed="false"><svg class="ico"><use href="#i-repeat"/></svg><span class="m-one" hidden>1</span></button>
+  </div>
+  <div class="m-side">
+    <span id="mTime" class="m-time muted small">0:00 / 0:00</span>
+    <button type="button" id="mLyricsBtn" class="icon-btn" aria-label="Text písně" hidden><svg class="ico"><use href="#i-lyrics"/></svg></button>
+    <button type="button" id="mDownload" class="icon-btn" aria-label="Stáhnout skladbu" hidden><svg class="ico"><use href="#i-download"/></svg></button>
+    <label class="m-volume" title="Hlasitost"><svg class="ico"><use href="#i-volume"/></svg><input id="mVolume" type="range" min="0" max="100" value="100" aria-label="Hlasitost"></label>
+    <button type="button" id="mQueueBtn" class="icon-btn" aria-label="Fronta skladeb" aria-controls="mQueue" aria-expanded="false"><svg class="ico"><use href="#i-queue"/></svg></button>
+  </div>
+</div>
+
+<aside id="mQueue" class="drawer m-queue" aria-label="Fronta skladeb" inert>
+  <header>
+    <h2>Fronta skladeb</h2>
+    <button type="button" id="mQueueClose" class="icon-btn" aria-label="Zavřít"><svg class="ico"><use href="#i-x"/></svg></button>
+  </header>
+  <div class="setting m-automix">
+    <div><strong>Automix</strong><p class="muted small">Až fronta dohraje, přidá podobné skladby (jen online).</p></div>
+    <label class="switch"><input type="checkbox" id="mAutomix" aria-label="Automix"><i></i></label>
+  </div>
+  <ul id="mQueueList" class="m-tracks m-queue-list"></ul>
+  <footer><button type="button" id="mQueueClear" class="link">Vyprázdnit frontu</button></footer>
+</aside>
+
+<dialog id="mLyrics" class="player m-lyrics" aria-label="Text písně">
+  <header>
+    <span id="mLyricsTitle" class="player-title"></span>
+    <button type="button" id="mLyricsClose" class="icon-btn" aria-label="Zavřít"><svg class="ico"><use href="#i-x"/></svg></button>
+  </header>
+  <div class="m-lyrics-body"><p id="mLyricsText"></p><p id="mLyricsSource" class="muted small"></p></div>
+</dialog>
+
+<audio id="mAudio" preload="auto"></audio>
+
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <script src="/help.js?v=1" defer></script>
-<script src="/app.js?v=6" defer></script>
+<script src="/app.js?v=7" defer></script>
+<script src="/music.js?v=2" defer></script>
 </body>
 </html>
