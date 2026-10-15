@@ -13,8 +13,6 @@ import socket
 import subprocess
 import threading
 import time
-import urllib.error
-import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
@@ -871,6 +869,64 @@ def get_file(jid: str, request: Request):
 # Náhled bez stahování: server vezme přímý odkaz na video a proudem ho posílá
 # prohlížeči (odkazy YouTube jsou vázané na IP serveru, přímo z prohlížeče by nešly).
 # --------------------------------------------------------------------------
+MEDIA_CHUNK = 8 * 1024 * 1024  # YouTube nemá rád neomezené rozsahy, posílá se po kouscích jako v yt-dlp
+UPSTREAM_ERROR = 424  # ne 502: tu Cloudflare nahradí vlastní stránkou a prohlížeč se nedozví důvod
+
+
+def media_ip(url: str) -> str:
+    """IP, pro kterou YouTube odkaz vydal (parametr ip= v adrese googlevideo), do logu."""
+    m = re.search(r"[?&]ip=([^&]+)", url or "")
+    return m.group(1) if m else "?"
+
+
+def open_media(info: dict, range_header: Optional[str]):
+    """Otevře přímý odkaz na médium přes síťovou vrstvu yt-dlp: stejné cookies, hlavičky a síťové
+    nastavení jako při jeho zjištění (obyčejný urllib dostával na serveru od googlevideo 403).
+    Vrátí (ydl, odpověď); ydl je potřeba zavřít, až se odpověď dočte."""
+    from yt_dlp.networking import Request as YRequest
+
+    headers = {k: v for k, v in info["headers"].items() if k.lower() != "range"}
+    if range_header:
+        m = re.fullmatch(r"\s*bytes=(\d+)-\s*", range_header)
+        host = urlparse(info["url"]).hostname or ""
+        if m and host.endswith("googlevideo.com"):
+            start = int(m.group(1))
+            range_header = f"bytes={start}-{start + MEDIA_CHUNK - 1}"
+        headers["Range"] = range_header
+    ydl = yt_dlp.YoutubeDL({**info.get("opts", {}), "quiet": True, "no_warnings": True})
+    try:
+        return ydl, ydl.urlopen(YRequest(info["url"], headers=headers))
+    except Exception:
+        ydl.close()
+        raise
+
+
+def media_status(exc) -> Optional[int]:
+    """HTTP kód z chyby yt-dlp (nebo urllib), jinak None."""
+    return getattr(exc, "status", None) or getattr(exc, "code", None)
+
+
+def stream_media(ydl, upstream, default_type: str, extra_headers: dict = None) -> StreamingResponse:
+    out_headers = {"Accept-Ranges": "bytes", **(extra_headers or {})}
+    for h in ("Content-Length", "Content-Range"):
+        if upstream.headers.get(h):
+            out_headers[h] = upstream.headers[h]
+
+    def chunks():
+        try:
+            while True:
+                chunk = upstream.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            upstream.close()
+            ydl.close()
+
+    return StreamingResponse(chunks(), status_code=upstream.status,
+                             media_type=upstream.headers.get("Content-Type") or default_type, headers=out_headers)
+
+
 PREVIEW_TTL = 600
 _preview_cache: dict = {}
 PREVIEW_FORMAT = (
@@ -879,16 +935,19 @@ PREVIEW_FORMAT = (
 )
 
 
-def resolve_preview(sid: str, url: str) -> dict:
+def resolve_preview(sid: str, url: str, ipv4: bool = False) -> dict:
     now = time.time()
     for k in [k for k, v in _preview_cache.items() if v["expires"] < now]:
         _preview_cache.pop(k, None)
     hit = _preview_cache.get((sid, url))
-    if hit:
+    if hit and not ipv4:
         return hit
-    rate_check("info", sid, INFO_PER_HOUR, 3600, "Moc rychle za sebou. Zkus to za chvíli.")
+    if not ipv4:
+        rate_check("info", sid, INFO_PER_HOUR, 3600, "Moc rychle za sebou. Zkus to za chvíli.")
     state: dict = {}
     opts = base_opts(url=url)
+    if ipv4:
+        opts["source_address"] = "0.0.0.0"
     opts.update(skip_download=True, format=PREVIEW_FORMAT, match_filter=video_filter(state))
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -904,7 +963,7 @@ def resolve_preview(sid: str, url: str) -> dict:
     host = urlparse(media_url).hostname if media_url else None
     if not media_url or not host or not is_public_host(host):
         raise HTTPException(422, "Tohle video nejde přehrát jako náhled, můžeš ho ale stáhnout.")
-    info = {"url": media_url, "headers": data.get("http_headers") or {}, "expires": now + PREVIEW_TTL}
+    info = {"url": media_url, "headers": data.get("http_headers") or {}, "expires": now + PREVIEW_TTL, "opts": opts}
     _preview_cache[(sid, url)] = info
     return info
 
@@ -912,37 +971,25 @@ def resolve_preview(sid: str, url: str) -> dict:
 @app.get("/api/preview")
 def preview(request: Request, url: str):
     url = clean_url(url)
-    info = resolve_preview(request.state.sid, url)
-    headers = {k: v for k, v in info["headers"].items() if k.lower() != "range"}
-    if request.headers.get("range"):
-        headers["Range"] = request.headers["range"]
-    try:
-        upstream = urllib.request.urlopen(urllib.request.Request(info["url"], headers=headers), timeout=30)
-    except urllib.error.HTTPError as e:
-        _preview_cache.pop((request.state.sid, url), None)
-        raise HTTPException(416 if e.code == 416 else 502, "Video se nepodařilo načíst.")
-    except Exception:
-        _preview_cache.pop((request.state.sid, url), None)
-        raise HTTPException(502, "Video se nepodařilo načíst.")
-    out_headers = {"Accept-Ranges": "bytes", "Cache-Control": "no-store"}
-    for h in ("Content-Length", "Content-Range"):
-        if upstream.headers.get(h):
-            out_headers[h] = upstream.headers[h]
-
-    def chunks():
+    sid = request.state.sid
+    last = None
+    # 1) jak yt-dlp odkaz vydal, 2) znovu a celé přes IPv4 (odkaz je vázaný na IP; když server
+    #    zjistí odkaz přes IPv6 a stahuje přes IPv4 nebo naopak, googlevideo vrátí 403)
+    for ipv4 in (False, True):
+        info = resolve_preview(sid, url, ipv4)
         try:
-            while True:
-                chunk = upstream.read(64 * 1024)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            upstream.close()
-
-    return StreamingResponse(
-        chunks(), status_code=upstream.status,
-        media_type=upstream.headers.get("Content-Type") or "video/mp4", headers=out_headers,
-    )
+            ydl, upstream = open_media(info, request.headers.get("range"))
+            if ipv4:
+                print(f"Náhled: přes IPv4 prošlo (ip={media_ip(info['url'])})", flush=True)
+            return stream_media(ydl, upstream, "video/mp4", {"Cache-Control": "no-store"})
+        except Exception as e:  # noqa: BLE001
+            _preview_cache.pop((sid, url), None)
+            last = media_status(e)
+            if last == 416:
+                raise HTTPException(416, "Video se nepodařilo načíst.")
+            print(f"Náhled: googlevideo vrátil {last or type(e).__name__} ({'IPv4' if ipv4 else 'výchozí síť'}, "
+                  f"ip={media_ip(info['url'])})", flush=True)
+    raise HTTPException(UPSTREAM_ERROR, f"Video se nepodařilo načíst (HTTP Error {last})." if last else "Video se nepodařilo načíst.")
 
 
 @app.get("/api/jobs/{jid}/stream")
@@ -1008,7 +1055,8 @@ restore_jobs()
 threading.Thread(target=janitor, daemon=True).start()
 
 music.configure(rate_check=rate_check, current_key=current_key, base_opts=base_opts, is_public_host=is_public_host,
-                friendly=friendly, daily_limit=DAILY_LIMIT)
+                friendly=friendly, daily_limit=DAILY_LIMIT, open_media=open_media, stream_media=stream_media,
+                media_status=media_status, media_ip=media_ip, upstream_error=UPSTREAM_ERROR)
 app.include_router(music.router)
 
 # Statické soubory musí být připojené jako poslední, aby nepřebily /api.

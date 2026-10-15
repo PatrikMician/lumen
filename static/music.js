@@ -196,7 +196,7 @@
         const r = await fetch(src, { headers: { Range: "bytes=0-1" } });
         if (!r.ok) {
           const d = await r.json().catch(() => ({}));
-          if (d.detail) msg = d.detail;
+          msg = d.detail || `${msg} (HTTP Error ${r.status})`;
         } else if (audio.error && audio.error.code === 4) {
           msg = "Prohlížeč nepřehraje formát skladby: " + t.title;
         }

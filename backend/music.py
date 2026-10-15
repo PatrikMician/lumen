@@ -14,14 +14,11 @@ import os
 import re
 import threading
 import time
-import urllib.error
-import urllib.request
 from typing import Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
 
 MUSIC_ENABLED = os.getenv("MUSIC", "1") == "1"
 MUSIC_REQUIRE_KEY = os.getenv("MUSIC_REQUIRE_KEY", "1") == "1"
@@ -40,9 +37,12 @@ _deps: dict = {}
 
 
 def configure(*, rate_check: Callable, current_key: Callable, base_opts: Callable, is_public_host: Callable,
-              friendly: Callable, daily_limit: int):
+              friendly: Callable, daily_limit: int, open_media: Callable, stream_media: Callable,
+              media_status: Callable, media_ip: Callable, upstream_error: int):
     _deps.update(rate_check=rate_check, current_key=current_key, base_opts=base_opts,
-                 is_public_host=is_public_host, friendly=friendly, daily_limit=daily_limit)
+                 is_public_host=is_public_host, friendly=friendly, daily_limit=daily_limit,
+                 open_media=open_media, stream_media=stream_media, media_status=media_status,
+                 media_ip=media_ip, upstream_error=upstream_error)
 
 
 # --------------------------------------------------------------------------
@@ -456,20 +456,25 @@ _streams: dict = {}
 _streams_lock = threading.Lock()
 
 
-def resolve_stream(video_id: str) -> dict:
+_prefer_ipv4 = False  # po prvním úspěchu přes IPv4 (a neúspěchu výchozí sítě) rovnou přes IPv4
+
+
+def resolve_stream(video_id: str, ipv4: bool = False) -> dict:
     now = time.time()
     with _streams_lock:
         for k in [k for k, v in _streams.items() if v["expires"] < now]:
             _streams.pop(k, None)
         hit = _streams.get(video_id)
-    if hit:
+    if hit and (not ipv4 or hit.get("ipv4")):
         return hit
-    data, media, last_error = None, None, "zvuk se nenašel"
+    data, media, opts, last_error = None, None, None, "zvuk se nenašel"
     # 1) YouTube Music s m4a (hraje všude), 2) obyčejný YouTube s jakýmkoliv zvukem, kdyby Music
     # klient na serveru formáty nevrátil (třeba kvůli omezení IP nebo změně na straně YouTube)
     for url, fmt in ((f"https://music.youtube.com/watch?v={video_id}", AUDIO_FORMAT),
                      (f"https://www.youtube.com/watch?v={video_id}", AUDIO_FORMAT + "/best")):
         opts = _deps["base_opts"](url=url)
+        if ipv4:
+            opts["source_address"] = "0.0.0.0"
         opts.update(skip_download=True, format=fmt)
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -491,59 +496,39 @@ def resolve_stream(video_id: str) -> dict:
     except ValueError:
         expire = 0
     ttl = min(5 * 3600, expire - now - 300) if expire > now + 600 else 30 * 60
-    info = {"url": media, "headers": data.get("http_headers") or {}, "expires": now + ttl,
+    info = {"url": media, "headers": data.get("http_headers") or {}, "expires": now + ttl, "opts": opts, "ipv4": ipv4,
             "type": "audio/mp4" if data.get("ext") == "m4a" else f"audio/{data.get('ext') or 'webm'}"}
     with _streams_lock:
         _streams[video_id] = info
     return info
 
 
-def _open(info: dict, range_header: Optional[str]):
-    headers = {k: v for k, v in info["headers"].items() if k.lower() != "range"}
-    if range_header:
-        headers["Range"] = range_header
-    return urllib.request.urlopen(urllib.request.Request(info["url"], headers=headers), timeout=30)
-
-
 @router.get("/api/music/stream/{video_id}")
 def music_stream(request: Request, video_id: str):
+    global _prefer_ipv4
     check_id(video_id)
     rng = request.headers.get("range")
     # do limitu se počítá spuštění skladby, ne každý kousek, o který si přehrávač řekne při přetáčení
     need_online(request, "music_track" if not rng or rng.strip() in ("bytes=0-", "bytes=0-1") else "music")
-    upstream = None
-    for attempt in (1, 2):
-        info = resolve_stream(video_id)
+    last = None
+    # 1) výchozí síť, 2) celé znovu přes IPv4: odkaz googlevideo je vázaný na IP, ze které ho yt-dlp
+    #    získal, a když server zjišťuje přes IPv6 a stahuje přes IPv4 (nebo naopak), vrací se 403
+    for ipv4 in ((True,) if _prefer_ipv4 else (False, True)):
+        info = resolve_stream(video_id, ipv4)
         try:
-            upstream = _open(info, rng)
-            break
-        except urllib.error.HTTPError as e:
-            with _streams_lock:
-                _streams.pop(video_id, None)  # odkaz mohl vypršet, zkusíme ho jednou získat znovu
-            if e.code == 416:
-                raise HTTPException(416, "Mimo rozsah skladby.")
-            print(f"Hudba: stream {video_id} vrátil HTTP {e.code} (pokus {attempt})", flush=True)
-            if attempt == 2:
-                raise HTTPException(502, f"Skladbu se nepodařilo načíst (HTTP Error {e.code}).")
+            ydl, upstream = _deps["open_media"](info, rng)
         except Exception as e:  # noqa: BLE001
             with _streams_lock:
                 _streams.pop(video_id, None)
-            print(f"Hudba: stream {video_id} selhal: {type(e).__name__}: {e} (pokus {attempt})", flush=True)
-            if attempt == 2:
-                raise HTTPException(502, "Skladbu se nepodařilo načíst: " + _deps["friendly"](e))
-    out_headers = {"Accept-Ranges": "bytes", "Cache-Control": "private, max-age=3600"}
-    for h in ("Content-Length", "Content-Range"):
-        if upstream.headers.get(h):
-            out_headers[h] = upstream.headers[h]
-
-    def chunks():
-        try:
-            while True:
-                chunk = upstream.read(64 * 1024)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            upstream.close()
-
-    return StreamingResponse(chunks(), status_code=upstream.status, media_type=info["type"], headers=out_headers)
+            last = _deps["media_status"](e)
+            if last == 416:
+                raise HTTPException(416, "Mimo rozsah skladby.")
+            print(f"Hudba: stream {video_id} vrátil {last or type(e).__name__ + ': ' + str(e)[:120]} "
+                  f"({'IPv4' if ipv4 else 'výchozí síť'}, ip={_deps['media_ip'](info['url'])})", flush=True)
+            continue
+        if ipv4 and not _prefer_ipv4:
+            _prefer_ipv4 = True
+            print(f"Hudba: přes IPv4 prošlo (ip={_deps['media_ip'](info['url'])}), další skladby rovnou přes IPv4", flush=True)
+        return _deps["stream_media"](ydl, upstream, info["type"], {"Cache-Control": "private, max-age=3600"})
+    raise HTTPException(_deps["upstream_error"], f"Skladbu se nepodařilo načíst (HTTP Error {last})." if last
+                        else "Skladbu se nepodařilo načíst.")
