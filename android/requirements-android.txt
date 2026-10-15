@@ -1,0 +1,7 @@
+# Python balíčky pro server v telefonu: jen čistý Python (pro Android nejsou nativní kola).
+# pydantic 1 místo 2 (pydantic-core je nativní), FastAPI 0.115 umí obojí. yt-dlp dodává youtubedl-android.
+fastapi==0.115.14
+pydantic>=1.10.21,<2
+uvicorn>=0.29
+python-multipart>=0.0.9
+ytmusicapi>=1.12

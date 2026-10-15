@@ -10,3 +10,9 @@ build/
 dist/
 .venv-desktop/
 *.spec
+
+# Android
+android/keystore.properties
+android/local.properties
+android/.gradle/
+*.jks

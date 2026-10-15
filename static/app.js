@@ -858,8 +858,9 @@
       // volba "Přihlášení z prohlížeče" funguje jen doma, na serveru by způsobila chybu, tak se tam schová
       const cookiesRow = document.querySelector('[data-setting="cookiesFrom"]');
       if (cookiesRow && cookiesRow.closest(".setting")) cookiesRow.closest(".setting").hidden = !h.browser_cookies;
+      const appName = h.platform === "android" ? "Lumen pro Android" : "Lumen pro PC";
       $("#versionLine").textContent = h.desktop
-        ? `Lumen pro PC, yt-dlp ${h.ytdlp}. Aktualizuje se sám při spuštění, nová verze platí od dalšího spuštění.`
+        ? `${appName}, yt-dlp ${h.ytdlp}. Aktualizuje se sám při spuštění, nová verze platí od dalšího spuštění.`
         : `yt-dlp ${h.ytdlp}. Při potížích s YouTube ho nejdřív aktualizuj (postup je v README).`;
       const msgs = [];
       if (!h.ffmpeg) msgs.push("Chybí ffmpeg. Bez něj nejde spojit video se zvukem ani převádět formáty.");
@@ -882,9 +883,10 @@
     if (h.desktop) {
       if (!a.update) return;
       const p = document.createElement("p");
-      p.append(`Je dostupná nová verze Lumenu pro PC ${a.update.version} (máš ${a.current}). `);
-      const link = Object.assign(document.createElement("a"), { href: a.update.url, textContent: "Stáhnout instalátor" });
-      p.append(link, " a po zavření Lumenu ho spusť.");
+      const droid = h.platform === "android";
+      p.append(`Je dostupná nová verze ${droid ? "Lumenu pro Android" : "Lumenu pro PC"} ${a.update.version} (máš ${a.current}). `);
+      const link = Object.assign(document.createElement("a"), { href: a.update.url, textContent: droid ? "Stáhnout APK" : "Stáhnout instalátor" });
+      p.append(link, droid ? " a otevři ho, nainstaluje se přes stávající verzi." : " a po zavření Lumenu ho spusť.");
       $("#banner").append(p);
       $("#banner").hidden = false;
       return;
@@ -915,7 +917,7 @@
     box.hidden = !h.support;
     if (!h.support) return;
     const { name, email } = h.support;
-    const where = h.desktop ? "Lumen pro PC" : "web Lumenu";
+    const where = { windows: "Lumen pro PC", android: "Lumen pro Android" }[h.platform] || "web Lumenu";
     const body = `\n\n---\n${where}, yt-dlp ${h.ytdlp}\n${navigator.userAgent}`;
     $("#supportMail").href = `mailto:${email}?subject=${encodeURIComponent("Lumen – podpora")}&body=${encodeURIComponent(body)}`;
     const mail = Object.assign(document.createElement("a"), { href: `mailto:${email}`, textContent: email });

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="lumen_bg">#1B1730</color>
+    <color name="lumen_accent">#F5A623</color>
+    <style name="Theme.Lumen" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/lumen_bg</item>
+        <item name="android:statusBarColor">@color/lumen_bg</item>
+        <item name="android:navigationBarColor">@color/lumen_bg</item>
+        <item name="android:colorAccent">@color/lumen_accent</item>
+    </style>
+</resources>

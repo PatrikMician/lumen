@@ -233,6 +233,30 @@ ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/Lumen-1
 
 Starší verze ve složce nevadí (nabízí se nejvyšší), můžeš je smazat. Verze je v `desktop/lumen_desktop.py` a `desktop/setup_app.py` (`APP_VERSION`). Instalátor není podepsaný, Windows SmartScreen proto při prvním spuštění zobrazí varování (Další informace → Přesto spustit).
 
+## Lumen pro Android
+
+APK `Lumen-<verze>.apk`: Lumen běží celý v telefonu (yt-dlp, ffmpeg i server), YouTube vidí IP telefonu. Klíče a denní limit fungují jako v PC verzi (ověřuje je server Lumenu).
+
+- Python 3.12, ffmpeg, QuickJS (JavaScript pro YouTube) a yt-dlp dodává knihovna [youtubedl-android](https://github.com/JunkFood02/youtubedl-android) 0.18.1. yt-dlp se jednou denně aktualizuje z GitHubu, nová verze platí od dalšího spuštění.
+- Backend Lumenu běží v telefonu jako samostatný proces Pythonu (`android/py/lumen_android.py`) na 127.0.0.1, okno je WebView se stejným rozhraním jako web.
+- V telefonu je **pydantic 1** (pydantic 2 potřebuje nativní knihovnu, která pro Android není), balíčky jsou jen čistý Python (`android/requirements-android.txt`).
+- Stažené soubory se ukládají do **Stažené soubory/Lumen**. Odkaz jde do Lumenu poslat přes „Sdílet“ z YouTube.
+- Lumen běží na pozadí (oznámení „Lumen běží“), ukončí se tlačítkem v oznámení.
+- Android 10 a novější, telefony ARM (arm64-v8a, armeabi-v7a). APK má asi 100 MB.
+
+**Sestavení** (Windows): potřebuje JDK 17 a Android SDK (platform 35, build-tools 35). Skript je hledá v `JAVA_HOME` / `ANDROID_HOME`, jinak ve složce `~/.lumen-android` (`jdk/jdk-17…`, `sdk/`).
+
+```
+python android/build_android.py             # dist/Lumen-<verze>.apk pro telefony
+python android/build_android.py --emulator  # dist/Lumen-<verze>-emulator.apk (x86_64) na zkoušení
+```
+
+Verze je v `android/gradle.properties` (`lumenVersion`, `lumenVersionCode`, při vydání zvýšit obě).
+
+**Podpisový klíč:** při prvním sestavení se vytvoří `~/.lumen-android/keystore/lumen-release.jks` a `android/keystore.properties` (obojí mimo git). **Zálohuj je**: aktualizace se dá nainstalovat přes starou verzi jen se stejným klíčem, jinak by ji uživatelé museli nejdřív odinstalovat.
+
+**Stažení z webu:** APK nahraj do `APP_DIR` jako `Lumen-<verze>.apk` (příkaz výše u PC verze), web pak ukáže kartu „Lumen pro Android“. Aplikace sama nabídne novou verzi, když je na serveru vyšší.
+
 ## Právní poznámka
 
 Stahování z YouTube a dalších služeb může být v rozporu s jejich podmínkami užívání. Používej aplikaci jen pro obsah, ke kterému máš práva, nebo pro osobní účely tam, kde to zákon dovoluje.

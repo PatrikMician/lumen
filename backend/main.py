@@ -63,8 +63,12 @@ ALLOW_GENERIC = os.getenv("ALLOW_GENERIC", "0") == "1"  # obecný extraktor (lib
 ALLOW_BROWSER_COOKIES = os.getenv("ALLOW_BROWSER_COOKIES", "0") == "1"
 IMPERSONATE = os.getenv("IMPERSONATE", "chrome").strip()  # napodobení prohlížeče pro weby, které vrací 403 (prázdné = vypnuto)
 # JavaScript runtime pro YouTube (yt-dlp: deno, node, bun, quickjs). Server má Deno, PC verze zkouší i Node a Bun.
-JS_RUNTIMES = [r.strip().lower() for r in os.getenv("JS_RUNTIMES", "deno").split(",") if r.strip()]
-DESKTOP = os.getenv("LUMEN_DESKTOP") == "1"  # PC aplikace: běží u uživatele, klíče ověřuje server (KEY_SERVER)
+# Položka může mít cestu: "quickjs:/cesta/k/qjs" (Android má QuickJS přibalený pod jiným názvem).
+_JS_SPECS = [r.strip() for r in os.getenv("JS_RUNTIMES", "deno").split(",") if r.strip()]
+JS_RUNTIMES = [r.split(":", 1)[0].lower() for r in _JS_SPECS]
+JS_PATHS = {r.split(":", 1)[0].lower(): r.split(":", 1)[1] for r in _JS_SPECS if ":" in r}
+DESKTOP = os.getenv("LUMEN_DESKTOP") == "1"  # aplikace (PC, Android): běží u uživatele, klíče ověřuje server (KEY_SERVER)
+PLATFORM = os.getenv("LUMEN_PLATFORM", "windows" if DESKTOP else "web")  # web | windows | android
 
 BROWSERS = {"chrome", "firefox", "edge", "brave", "opera", "safari", "vivaldi", "chromium"}
 AUDIO_FORMATS = {"mp3", "m4a", "opus", "flac", "wav"}
@@ -77,6 +81,8 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 def _find_ffmpeg():
     """Vrátí (cesta, je_v_PATH). Když ffmpeg není nainstalovaný, zkusí balík imageio-ffmpeg."""
+    if os.getenv("FFMPEG_PATH"):  # Android: ffmpeg přibalený v aplikaci
+        return os.environ["FFMPEG_PATH"], False
     path = shutil.which("ffmpeg")
     if path:
         return path, True
@@ -366,7 +372,7 @@ def base_opts(cookies_from: Optional[str] = None, url: Optional[str] = None) -> 
     if not ALLOW_GENERIC:
         opts["allowed_extractors"] = ["default", "-generic"]
     if JS_RUNTIMES != ["deno"]:
-        opts["js_runtimes"] = {r: {} for r in JS_RUNTIMES}
+        opts["js_runtimes"] = {r: ({"path": JS_PATHS[r]} if r in JS_PATHS else {}) for r in JS_RUNTIMES}
     if FFMPEG and not FFMPEG_IN_PATH:
         opts["ffmpeg_location"] = FFMPEG
     target = impersonate_target()
@@ -402,8 +408,9 @@ def health():
     return {
         "ytdlp": YTDLP_VERSION,
         "ffmpeg": bool(FFMPEG),
-        "deno": any(shutil.which(r) for r in JS_RUNTIMES),  # jakýkoli JavaScript runtime pro YouTube
+        "deno": any(os.path.isfile(JS_PATHS[r]) if r in JS_PATHS else shutil.which(r) for r in JS_RUNTIMES),  # jakýkoli JavaScript runtime pro YouTube
         "desktop": DESKTOP,
+        "platform": PLATFORM,
         "support": {"name": SUPPORT_NAME, "email": SUPPORT_EMAIL} if SUPPORT_EMAIL else None,
         "impersonate": bool(impersonate_target()),
         "browser_cookies": ALLOW_BROWSER_COOKIES,

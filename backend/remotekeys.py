@@ -129,12 +129,12 @@ def _version(v: str):
 
 
 def app_update() -> dict:
-    """Pro PC verzi: je na serveru novější instalátor? (výsledek se drží hodinu)"""
+    """Pro aplikaci (PC, Android): je na serveru novější verze? (výsledek se drží hodinu)"""
     now = time.time()
     if now - _app_cache["ts"] > 3600 or _app_cache["data"] is None:
         status, data = _request("GET", "/api/app")
         _app_cache.update(ts=now, data=data if status == 200 else {})
-    win = (_app_cache["data"] or {}).get("windows")
+    win = (_app_cache["data"] or {}).get(os.getenv("LUMEN_PLATFORM", "windows"))
     newer = bool(win and APP_VERSION and _version(win.get("version")) > _version(APP_VERSION))
     return {"current": APP_VERSION, "update": {"version": win["version"], "size": win.get("size"),
                                                "url": KEY_SERVER + win["url"]} if newer else None}
