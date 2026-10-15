@@ -617,6 +617,36 @@ def serve_cached(path: Path) -> FileResponse:
                         headers={"Cache-Control": "private, max-age=3600"})
 
 
+PREPARE_MAX = int(os.getenv("MUSIC_PREPARE_MAX", "3"))  # kolik skladeb se smí připravovat najednou (starý server)
+
+
+def _preparing() -> int:
+    return sum(1 for st in list(_downloads.values()) if not st["done"].is_set())
+
+
+@router.post("/api/music/prepare/{video_id}")
+def music_prepare(request: Request, video_id: str):
+    """Připraví skladbu předem (po najetí myší, otevření alba, další ve frontě), ať po kliknutí hraje hned.
+    Nic neposílá: v režimu mezipaměti rozjede stažení na pozadí, jinak jen zjistí adresu streamu."""
+    check_id(video_id)
+    need_online(request)  # počítá se jako dotaz do katalogu, ne jako spuštěná skladba
+    if cached_file(video_id):
+        return {"state": "ready"}
+    if _use_download:
+        state = _downloads.get(video_id)
+        if state and not state["done"].is_set():
+            return {"state": "preparing"}
+        if _preparing() >= PREPARE_MAX:
+            return {"state": "busy"}
+        start_download(video_id)
+        return {"state": "preparing"}
+    try:
+        resolve_stream(video_id)
+    except HTTPException:
+        return {"state": "failed"}
+    return {"state": "ready"}
+
+
 @router.get("/api/music/stream/{video_id}")
 def music_stream(request: Request, video_id: str):
     global _use_download

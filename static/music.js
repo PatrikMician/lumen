@@ -181,16 +181,28 @@
   ["canplay", "error", "emptied", "pause"].forEach((ev) => audio.addEventListener(ev, () => setLoading(false)));
   function setLoading(on) { $("#mPlay").classList.toggle("loading", on && !!audio.getAttribute("src")); }
 
-  /* Další online skladbu ve frontě si server připraví předem, ať po dohrání naváže hned */
-  const prefetched = new Set();
+  /* Příprava předem: server skladbu stáhne do mezipaměti (nebo zjistí stream) dřív, než na ni klikneš.
+     Volá se po najetí myší, po otevření alba či playlistu a pro další skladbu ve frontě. */
+  const prepared = new Set();
+  function prepare(id) {
+    if (!id || prepared.has(id) || !status || !status.online) return;
+    prepared.add(id);
+    fetch("/api/music/prepare/" + encodeURIComponent(id), { method: "POST" })
+      .then((r) => (r.ok ? r.json() : { state: "failed" }))
+      .then((d) => { if (d.state === "busy" || d.state === "failed") prepared.delete(id); })  // zkusí se znovu později
+      .catch(() => prepared.delete(id));
+  }
   function prefetchNext() {
     const n = queue[index + 1];
-    if (!n || n.src !== "online" || prefetched.has(n.id)) return;
-    prefetched.add(n.id);
-    setTimeout(() => {
-      fetch("/api/music/stream/" + encodeURIComponent(n.id), { headers: { Range: "bytes=0-1" } })
-        .then((r) => r.body && r.body.cancel()).catch(() => prefetched.delete(n.id));
-    }, 4000);
+    if (n && n.src === "online") setTimeout(() => prepare(n.id), 3000);
+  }
+  /* najetí myší (nebo prstem) na skladbu: krátká prodleva, ať se nepřipravuje všechno při projetí seznamem */
+  function prepareOnHover(node, t) {
+    if (t.src !== "online" && t.type !== "song" && t.type !== "video") return;
+    let timer = null;
+    node.addEventListener("pointerenter", () => { timer = setTimeout(() => prepare(t.id), 350); });
+    node.addEventListener("pointerleave", () => clearTimeout(timer));
+    node.addEventListener("touchstart", () => prepare(t.id), { passive: true });
   }
   audio.addEventListener("pause", renderPlayState);
   audio.addEventListener("play", renderPlayState);
@@ -445,6 +457,7 @@
     if (sub) text.append(el("span", "m-track-sub", sub));
     play.append(thumb, text);
     play.addEventListener("click", onPlay);
+    if (t.src === "online") prepareOnHover(li, t);
     li.append(play);
     li.append(el("span", "m-track-dur muted small", t.duration ? fmt(t.duration) : ""));
     const menu = el("span", "m-track-actions");
@@ -498,6 +511,7 @@
     a.append(el("span", "m-card-sub", sub));
     if (item.type === "song" || item.type === "video") {
       a.addEventListener("click", (e) => { e.preventDefault(); playSingle({ ...item, src: "online" }); });
+      prepareOnHover(a, item);
     }
     return a;
   }
@@ -698,6 +712,7 @@
     (data.sections || []).forEach((s) => nodes.push(shelf(s.title, s.items)));
     content.replaceChildren(...nodes);
     window.scrollTo({ top: 0 });
+    tracks.slice(0, 2).forEach((t) => prepare(t.id));  // album / playlist: první skladby budou hrát hned
   }
 
   /* Odkaz z YouTube Music / YouTube vložený do hledání */
