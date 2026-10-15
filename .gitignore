@@ -6,3 +6,7 @@ data/
 cookies.txt
 .env
 *.env
+build/
+dist/
+.venv-desktop/
+*.spec

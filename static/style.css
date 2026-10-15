@@ -388,6 +388,18 @@ select:disabled { opacity: .5; }
   .key-form { max-width: none; width: 100%; justify-content: flex-start; flex-basis: auto; }
 }
 
+/* Lumen pro Windows ke stažení */
+.app-card {
+  display: flex; align-items: center; gap: 14px;
+  margin: 8px 0 18px; padding: 12px 16px;
+  border: 1px solid var(--line); border-radius: 16px; background: var(--surface);
+  text-decoration: none; color: var(--text);
+}
+.app-card:hover { border-color: var(--accent); }
+.app-card .ico { color: var(--accent); }
+.app-card-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.banner a { color: var(--accent); }
+
 /* Žádost o klíč */
 .request-form .plain-input { font-family: inherit; letter-spacing: normal; text-transform: none; }
 .hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; pointer-events: none; }

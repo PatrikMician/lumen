@@ -858,15 +858,41 @@
       // volba "Přihlášení z prohlížeče" funguje jen doma, na serveru by způsobila chybu, tak se tam schová
       const cookiesRow = document.querySelector('[data-setting="cookiesFrom"]');
       if (cookiesRow && cookiesRow.closest(".setting")) cookiesRow.closest(".setting").hidden = !h.browser_cookies;
-      $("#versionLine").textContent = `yt-dlp ${h.ytdlp}. Při potížích s YouTube ho nejdřív aktualizuj (postup je v README).`;
+      $("#versionLine").textContent = h.desktop
+        ? `Lumen pro PC, yt-dlp ${h.ytdlp}. Aktualizuje se sám při spuštění, nová verze platí od dalšího spuštění.`
+        : `yt-dlp ${h.ytdlp}. Při potížích s YouTube ho nejdřív aktualizuj (postup je v README).`;
       const msgs = [];
       if (!h.ffmpeg) msgs.push("Chybí ffmpeg. Bez něj nejde spojit video se zvukem ani převádět formáty.");
-      if (!h.deno) msgs.push("Chybí Deno. Pro YouTube ho yt-dlp potřebuje, bez něj stahování často selže. Postup instalace je v README.");
+      if (!h.deno) msgs.push(h.desktop
+        ? "Pro některá videa z YouTube je potřeba Node.js nebo Deno. Nainstaluj Node.js z nodejs.org (LTS) a Lumen spusť znovu."
+        : "Chybí Deno. Pro YouTube ho yt-dlp potřebuje, bez něj stahování často selže. Postup instalace je v README.");
       const banner = $("#banner");
       banner.innerHTML = "";
       msgs.forEach((m) => { const p = document.createElement("p"); p.textContent = m; banner.append(p); });
       banner.hidden = msgs.length === 0;
+      loadApp(h);
     } catch { /* server ještě startuje */ }
+  }
+
+  /* Lumen pro Windows: na webu karta ke stažení (jen ve Windows), v PC verzi upozornění na novou verzi */
+  async function loadApp(h) {
+    let a;
+    try { a = await api("/api/app"); } catch { return; }
+    if (h.desktop) {
+      if (!a.update) return;
+      const p = document.createElement("p");
+      p.append(`Je dostupná nová verze Lumenu pro PC ${a.update.version} (máš ${a.current}). `);
+      const link = Object.assign(document.createElement("a"), { href: a.update.url, textContent: "Stáhnout instalátor" });
+      p.append(link, " a po zavření Lumenu ho spusť.");
+      $("#banner").append(p);
+      $("#banner").hidden = false;
+      return;
+    }
+    const card = $("#appCard");
+    if (!a.windows || !/Windows/i.test(navigator.userAgent)) { card.hidden = true; return; }
+    card.href = a.windows.url;
+    $("#appCardText").textContent = `Běží přímo na tvém počítači, hudba i stahování jsou rychlejší. Verze ${a.windows.version}, ${fmtBytes(a.windows.size)}.`;
+    card.hidden = false;
   }
 
   /* ---------- Pro music.js ---------- */

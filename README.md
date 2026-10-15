@@ -82,6 +82,9 @@ Důležité: **aplikace je bez hesla otevřená komukoliv, kdo zná adresu.** Na
 | `MUSIC_DIRECT` | `1` | `1` = nejdřív zkusit přímé čtení zvuku z YouTube, při 403 přejít na stažení do mezipaměti; `0` = rovnou přes mezipaměť. |
 | `MUSIC_CACHE_DIR` | `DATA_DIR/music-cache` | Mezipaměť stažených skladeb. |
 | `MUSIC_CACHE_MB` | `1024` | Největší velikost mezipaměti, nejdéle nehrané skladby se mažou. |
+| `APP_DIR` | `DATA_DIR/app` | Instalátory PC verze ke stažení z webu (`LumenSetup-<verze>.exe`). |
+| `JS_RUNTIMES` | `deno` | JavaScript runtime pro YouTube (`deno,node,bun,quickjs`). PC verze používá `deno,node,bun`. |
+| `KEY_SERVER` | prázdné | Jen PC verze: adresa serveru Lumenu, který ověřuje klíče a vyřizuje žádosti. |
 
 ### Varianta A: Docker
 ```
@@ -184,10 +187,42 @@ backend/main.py     API: info, stahování, převod, fronta, weby, klíče a ž�
 backend/music.py    API hudby: katalog (ytmusicapi) a přehrávání zvuku přes server
 static/             frontend (index.html, style.css, app.js, music.js)
 deploy/             systemd služba, noční aktualizace yt-dlp (timer + skript), lumenkeys
+desktop/            Lumen pro PC: spouštěč, instalátor a sestavovací skript
 run.py              spuštění serveru
 start.bat/.sh       instalace a spuštění jedním příkazem
 Dockerfile, docker-compose.yml
 ```
+
+## Lumen pro PC (Windows)
+
+Instalační balíček `LumenSetup-<verze>.exe`: Lumen pak běží celý na počítači uživatele, ne na serveru. YouTube vidí jeho IP a server nic nestahuje.
+
+- **Klíče a limity platí stejně jako na webu.** Denní limit (5 stažení) se počítá v aplikaci, online hudba je jen s klíčem. Klíč, žádost o klíč i žádost o víc zařízení vyřizuje server Lumenu (`KEY_SERVER`, endpointy `/api/remote/key` a `/api/remote/increase`): klíč se přiřadí k instalaci (stálé ID v `%LOCALAPPDATA%\Lumen\data\device_id`) jako jedno zařízení, schvalování e-mailem je stejné. Ověření platí 6 hodin, když server není dostupný, až 7 dní. **Server musí mít nasazenou verzi s těmito endpointy dřív, než lidé začnou PC verzi používat.**
+
+- **Instalace** bez práv správce do `%LOCALAPPDATA%\Programs\Lumen`, zástupce v nabídce Start (a volitelně na ploše), odinstalace přes Nastavení → Aplikace → Lumen. Data (mezipaměť hudby, okno) jsou v `%LOCALAPPDATA%\Lumen`, stažené soubory ukládá prohlížeč do složky Stažené soubory.
+- **Okno** je Microsoft Edge v režimu aplikace s vlastním profilem (Edge je ve Windows 10 a 11 vždy), bez něj Chrome, jinak výchozí prohlížeč. Zavřením okna se Lumen ukončí, druhé spuštění otevře další okno ke stejnému Lumenu.
+- **yt-dlp se aktualizuje sám**: při spuštění zkontroluje PyPI, novou verzi stáhne (ověří SHA-256) do `%LOCALAPPDATA%\Lumen\pylib` a použije ji od dalšího spuštění. Proto není zabalený uvnitř exe, ale přibalený jako složka.
+- **YouTube a JavaScript**: PC verze použije Deno, Node.js nebo Bun, cokoliv je nainstalované (`JS_RUNTIMES=deno,node,bun`). Bez nich některá videa nejdou, Lumen to ukáže v pruhu nahoře.
+- **Log**: `%LOCALAPPDATA%\Lumen\lumen.log`.
+
+Sestavení (Windows, Python 3.12+):
+
+```
+python -m venv .venv-desktop
+.venv-desktop\Scripts\pip install -r requirements.txt -r desktop/requirements-desktop.txt
+.venv-desktop\Scripts\python desktop/build_desktop.py
+```
+
+Výsledek je `dist\LumenSetup-<verze>.exe` (asi 80 MB, po instalaci asi 150 MB).
+
+**Stažení z webu:** web Lumenu nabízí na stránce Stáhnout kartu „Lumen pro Windows“ (jen ve Windows prohlížeči), když je ve složce `APP_DIR` (výchozí `/var/lib/lumen/app`) instalátor `LumenSetup-<verze>.exe`; nabízí se nejvyšší verze. PC verze stejný údaj (`/api/app`) používá, aby uživateli nahlásila novější verzi. Nahrání nové verze z Windows:
+
+```
+scp dist\LumenSetup-1.1.0.exe mican@mican-server:/tmp/
+ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/LumenSetup-1.1.0.exe /var/lib/lumen/app/LumenSetup-1.1.0.exe"
+```
+
+Starší verze ve složce nevadí (nabízí se nejvyšší), můžeš je smazat. Verze je v `desktop/lumen_desktop.py` a `desktop/setup_app.py` (`APP_VERSION`). Instalátor není podepsaný, Windows SmartScreen proto při prvním spuštění zobrazí varování (Další informace → Přesto spustit).
 
 ## Právní poznámka
 

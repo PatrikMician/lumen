@@ -27,7 +27,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from yt_dlp.version import __version__ as YTDLP_VERSION
 
-from . import keyrequests, music, quota
+from . import keyrequests, music, quota, remotekeys
+
+APP_DIR = Path(os.getenv("APP_DIR") or quota.DATA_DIR / "app")  # server: instalátory PC verze (LumenSetup-<verze>.exe)
+APP_NAME_RE = re.compile(r"LumenSetup-(\d+(?:\.\d+){1,3})\.exe")
 
 # --------------------------------------------------------------------------
 # Nastavení (jde měnit proměnnými prostředí, viz README)
@@ -52,6 +55,9 @@ ALLOW_GENERIC = os.getenv("ALLOW_GENERIC", "0") == "1"  # obecný extraktor (lib
 # Na serveru žádný prohlížeč není a návštěvník by dostal chybu "could not find chrome cookies database".
 ALLOW_BROWSER_COOKIES = os.getenv("ALLOW_BROWSER_COOKIES", "0") == "1"
 IMPERSONATE = os.getenv("IMPERSONATE", "chrome").strip()  # napodobení prohlížeče pro weby, které vrací 403 (prázdné = vypnuto)
+# JavaScript runtime pro YouTube (yt-dlp: deno, node, bun, quickjs). Server má Deno, PC verze zkouší i Node a Bun.
+JS_RUNTIMES = [r.strip().lower() for r in os.getenv("JS_RUNTIMES", "deno").split(",") if r.strip()]
+DESKTOP = os.getenv("LUMEN_DESKTOP") == "1"  # PC aplikace: běží u uživatele, klíče ověřuje server (KEY_SERVER)
 
 BROWSERS = {"chrome", "firefox", "edge", "brave", "opera", "safari", "vivaldi", "chromium"}
 AUDIO_FORMATS = {"mp3", "m4a", "opus", "flac", "wav"}
@@ -164,9 +170,20 @@ KEY_COOKIE = "lumen_key"
 
 def current_key(request: Request):
     """Záznam přístupového klíče z cookie, pokud platí a je přiřazený k tomuhle zařízení (prohlížeči).
-    Zrušený nebo uvolněný klíč, případně klíč zkopírovaný na jiné zařízení, neplatí."""
+    Zrušený nebo uvolněný klíč, případně klíč zkopírovaný na jiné zařízení, neplatí.
+    V PC verzi klíč ověřuje server Lumenu (s mezipamětí, viz remotekeys)."""
+    if remotekeys.enabled():
+        rec, _ = remotekeys.check(request.cookies.get(KEY_COOKIE, ""))
+        return rec
     rec, _ = quota.get_key(request.cookies.get(KEY_COOKIE, ""), request.state.sid)
     return rec
+
+
+def key_error(why: str) -> HTTPException:
+    if why == "other_device":
+        return HTTPException(403, "Tenhle klíč je už přiřazený k jinému zařízení a funguje jen tam. "
+                                  "Pokud sis změnil telefon nebo prohlížeč, napiš provozovateli, ať ti klíč uvolní.")
+    return HTTPException(403, "Tenhle klíč neplatí. Zkontroluj, že je opsaný celý, nebo ho nech vystavit znovu.")
 
 
 def fmt_wait(sec) -> str:
@@ -341,6 +358,8 @@ def base_opts(cookies_from: Optional[str] = None, url: Optional[str] = None) -> 
     }
     if not ALLOW_GENERIC:
         opts["allowed_extractors"] = ["default", "-generic"]
+    if JS_RUNTIMES != ["deno"]:
+        opts["js_runtimes"] = {r: {} for r in JS_RUNTIMES}
     if FFMPEG and not FFMPEG_IN_PATH:
         opts["ffmpeg_location"] = FFMPEG
     target = impersonate_target()
@@ -376,7 +395,8 @@ def health():
     return {
         "ytdlp": YTDLP_VERSION,
         "ffmpeg": bool(FFMPEG),
-        "deno": bool(shutil.which("deno")),
+        "deno": any(shutil.which(r) for r in JS_RUNTIMES),  # jakýkoli JavaScript runtime pro YouTube
+        "desktop": DESKTOP,
         "impersonate": bool(impersonate_target()),
         "browser_cookies": ALLOW_BROWSER_COOKIES,
         "auth": bool(AUTH_PASSWORD),
@@ -400,7 +420,10 @@ def get_quota(request: Request):
            "can_request": DAILY_LIMIT > 0 and not rec,
            "max_request_devices": keyrequests.MAX_REQUEST_DEVICES,
            "limit": DAILY_LIMIT, "used": 0, "remaining": DAILY_LIMIT, "reset_in": None}
-    if rec:
+    if rec and remotekeys.enabled():
+        out.update(key_devices=int(rec.get("max_devices", 1)), key_used=int(rec.get("used", 0)),
+                   increase_pending=rec.get("increase_pending"))
+    elif rec:
         pending = keyrequests.open_increase(rec.get("id"))
         out.update(key_devices=int(rec.get("max_devices", 1)), key_used=len(rec.get("devices", [])),
                    increase_pending={"devices": keyrequests.requested_devices(pending), "ts": pending["ts"]} if pending else None)
@@ -414,15 +437,14 @@ def get_quota(request: Request):
 def set_key(body: KeyIn, request: Request, response: Response):
     """Ověří přístupový klíč a uloží ho do cookie (klíč tak nezůstává v JavaScriptu)."""
     rate_check("key", quota.who(request), 10, 3600, "Moc pokusů o zadání klíče. Zkus to za hodinu.")
-    rec, why = quota.get_key(body.key, request.state.sid, bind=True)
-    if why == "other_device":
-        raise HTTPException(
-            403,
-            "Tenhle klíč je už přiřazený k jinému zařízení a funguje jen tam. "
-            "Pokud sis změnil telefon nebo prohlížeč, napiš provozovateli, ať ti klíč uvolní.",
-        )
-    if not rec:
-        raise HTTPException(403, "Tenhle klíč neplatí. Zkontroluj, že je opsaný celý, nebo ho nech vystavit znovu.")
+    if remotekeys.enabled():
+        rec, detail = remotekeys.check(body.key, force=True)
+        if not rec:
+            raise HTTPException(403, detail or "Tenhle klíč neplatí.")
+    else:
+        rec, why = quota.get_key(body.key, request.state.sid, bind=True)
+        if not rec:
+            raise key_error(why)
     response.set_cookie(
         KEY_COOKIE, quota.normalize(body.key), max_age=60 * 60 * 24 * 365, httponly=True, samesite="lax",
         secure=request.headers.get("x-forwarded-proto", request.url.scheme) == "https",
@@ -451,6 +473,8 @@ def request_key(body: KeyRequestIn, request: Request, background: BackgroundTask
         raise HTTPException(404, "Tenhle server žádný limit nemá, klíč není potřeba.")
     if current_key(request):
         raise HTTPException(400, "Přístupový klíč už máš aktivní.")
+    if remotekeys.enabled():  # PC verze: žádost vyřizuje server Lumenu
+        return remotekeys.forward("/api/key/request", body.model_dump())
     if body.website.strip():
         return {"ok": True, "email": ""}  # robot: tváříme se, že se to povedlo, a nic neděláme
     email = keyrequests.valid_email(body.email)
@@ -473,6 +497,12 @@ def request_increase(body: KeyRequestIn, request: Request, background: Backgroun
     key = current_key(request)
     if not key:
         raise HTTPException(403, "O víc zařízení jde požádat jen s aktivním přístupovým klíčem.")
+    if remotekeys.enabled():
+        return remotekeys.forward_increase(request.cookies.get(KEY_COOKIE, ""), body.model_dump())
+    return increase_core(key, body, request, background)
+
+
+def increase_core(key: dict, body: KeyRequestIn, request: Request, background: BackgroundTasks):
     if body.website.strip():
         return {"ok": True, "email": "", "devices": body.devices}
     email = keyrequests.valid_email(body.email)
@@ -493,6 +523,82 @@ def request_increase(body: KeyRequestIn, request: Request, background: Backgroun
     if status == "ok":
         background.add_task(keyrequests.notify, rec)
     return {"ok": True, "email": email, "devices": keyrequests.requested_devices(rec), "duplicate": status == "duplicate"}
+
+
+# --- PC verze: ověření klíče a žádost o víc zařízení ------------------------------
+DEVICE_RE = re.compile(r"[0-9a-f]{32}")
+
+
+class RemoteKeyIn(BaseModel):
+    key: str
+    device: str
+
+
+class RemoteIncreaseIn(KeyRequestIn):
+    key: str
+    device: str
+
+
+def remote_device(device: str) -> str:
+    if not DEVICE_RE.fullmatch(device or ""):
+        raise HTTPException(400, "Neplatné ID zařízení.")
+    return "desktop:" + device  # zařízení PC verze = jedna instalace Lumenu
+
+
+@app.post("/api/remote/key")
+def remote_key(body: RemoteKeyIn, request: Request):
+    """PC verze ověří (a při prvním použití přiřadí) klíč k instalaci. Vrátí stav klíče pro Nastavení."""
+    sid = remote_device(body.device)
+    rate_check("key", quota.who(request), 30, 3600, "Moc pokusů o zadání klíče. Zkus to za hodinu.")
+    rec, why = quota.get_key(body.key, sid, bind=True)
+    if not rec:
+        raise key_error(why)
+    pending = keyrequests.open_increase(rec.get("id"))
+    return {"id": rec.get("id"), "label": rec.get("label"), "max_devices": int(rec.get("max_devices", 1)),
+            "used": len(rec.get("devices", [])),
+            "increase_pending": {"devices": keyrequests.requested_devices(pending), "ts": pending["ts"]} if pending else None}
+
+
+@app.post("/api/remote/increase")
+def remote_increase(body: RemoteIncreaseIn, request: Request, background: BackgroundTasks):
+    rec, _ = quota.get_key(body.key, remote_device(body.device))
+    if not rec:
+        raise HTTPException(403, "O víc zařízení jde požádat jen s aktivním přístupovým klíčem.")
+    return increase_core(rec, body, request, background)
+
+
+# --- Stažení PC verze -------------------------------------------------------------
+def latest_app():
+    """Nejnovější instalátor v APP_DIR jako (verze, cesta), nebo None."""
+    found = []
+    for f in (APP_DIR.glob("LumenSetup-*.exe") if APP_DIR.is_dir() else []):
+        m = APP_NAME_RE.fullmatch(f.name)
+        if m and f.is_file():
+            found.append((tuple(int(x) for x in m.group(1).split(".")), m.group(1), f))
+    if not found:
+        return None
+    _, version, path = max(found)
+    return version, path
+
+
+@app.get("/api/app")
+def app_info():
+    """Server: je ke stažení PC verze? PC verze: je na serveru novější verze?"""
+    if DESKTOP:
+        return remotekeys.app_update()
+    latest = latest_app()
+    if not latest:
+        return {"windows": None}
+    version, path = latest
+    return {"windows": {"version": version, "size": path.stat().st_size, "url": "/api/app/windows"}}
+
+
+@app.get("/api/app/windows")
+def app_download():
+    latest = None if DESKTOP else latest_app()
+    if not latest:
+        raise HTTPException(404, "Lumen pro Windows teď není ke stažení.")
+    return FileResponse(latest[1], filename=latest[1].name, media_type="application/octet-stream")
 
 
 # --- Schválení žádosti odkazem z e-mailu -----------------------------------------

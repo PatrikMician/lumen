@@ -550,6 +550,22 @@
    ]
   },
   {
+   "code": "E186",
+   "group": "Přístup",
+   "title": "Server Lumenu není dostupný (PC verze)",
+   "summary": "Lumen pro PC ověřuje přístupové klíče a posílá žádosti o klíč přes server Lumenu. Ten se teď nepodařilo zastihnout.",
+   "steps": [
+    "Zkontroluj připojení k internetu.",
+    "Už ověřený klíč funguje i bez internetu ještě 7 dní, stahovat jde dál.",
+    "Když server nejde delší dobu, napiš provozovateli a přilož kód E186."
+   ],
+   "match": [
+    "Server Lumenu teď není dostupný",
+    "Server Lumenu odpověděl chybou",
+    "Server Lumenu žádost nepřijal"
+   ]
+  },
+  {
    "code": "E999",
    "group": "Ostatní",
    "title": "Neznámá chyba",
