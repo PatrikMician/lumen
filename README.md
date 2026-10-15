@@ -202,7 +202,7 @@ Instalační balíček `LumenSetup-<verze>.exe`: Lumen pak běží celý na poč
 - **Klíče a limity platí stejně jako na webu.** Denní limit (5 stažení) se počítá v aplikaci, online hudba je jen s klíčem. Klíč, žádost o klíč i žádost o víc zařízení vyřizuje server Lumenu (`KEY_SERVER`, endpointy `/api/remote/key` a `/api/remote/increase`): klíč se přiřadí k instalaci (stálé ID v `%LOCALAPPDATA%\Lumen\data\device_id`) jako jedno zařízení, schvalování e-mailem je stejné. Ověření platí 6 hodin, když server není dostupný, až 7 dní. **Server musí mít nasazenou verzi s těmito endpointy dřív, než lidé začnou PC verzi používat.**
 
 - **Instalace** bez práv správce do `%LOCALAPPDATA%\Programs\Lumen`, zástupce v nabídce Start (a volitelně na ploše), odinstalace přes Nastavení → Aplikace → Lumen. Data (mezipaměť hudby, okno) jsou v `%LOCALAPPDATA%\Lumen`, stažené soubory ukládá prohlížeč do složky Stažené soubory.
-- **Okno** je Microsoft Edge v režimu aplikace s vlastním profilem (Edge je ve Windows 10 a 11 vždy), bez něj Chrome, jinak výchozí prohlížeč. Zavřením okna se Lumen ukončí, druhé spuštění otevře další okno ke stejnému Lumenu.
+- **Okno** je vlastní okno aplikace (pywebview + Microsoft WebView2), nezávisí na tom, jaký prohlížeč má uživatel. WebView2 je ve Windows 11 a většině Windows 10; když chybí, Lumen stáhne a spustí oficiální instalátor od Microsoftu (ověří jeho podpis). Teprve když ani to nejde, otevře okno prohlížeče v režimu aplikace (Edge, Chrome, Brave, Vivaldi), úplně nakonec výchozí prohlížeč. Zavřením okna se Lumen ukončí, druhé spuštění otevře další okno ke stejnému Lumenu. Data okna (přihlášení klíčem, nastavení) jsou v `%LOCALAPPDATA%\Lumen\webview`.
 - **yt-dlp se aktualizuje sám**: při spuštění zkontroluje PyPI, novou verzi stáhne (ověří SHA-256) do `%LOCALAPPDATA%\Lumen\pylib` a použije ji od dalšího spuštění. Proto není zabalený uvnitř exe, ale přibalený jako složka.
 - **YouTube a JavaScript**: PC verze použije Deno, Node.js nebo Bun, cokoliv je nainstalované (`JS_RUNTIMES=deno,node,bun`). Bez nich některá videa nejdou, Lumen to ukáže v pruhu nahoře.
 - **Log**: `%LOCALAPPDATA%\Lumen\lumen.log`.
@@ -220,8 +220,8 @@ Výsledek je `dist\LumenSetup-<verze>.exe` (asi 80 MB, po instalaci asi 150 MB).
 **Stažení z webu:** web Lumenu ukazuje na stránce Stáhnout sekci „Lumen jako aplikace“ s kartami podle toho, co je ve složce `APP_DIR` (výchozí `/var/lib/lumen/app`): „Lumen pro Windows“ pro `LumenSetup-<verze>.exe` (ne na telefonu) a „Lumen pro Android“ pro `Lumen-<verze>.apk` (ne na iPhonu; na Androidu je první). Karta platformy bez souboru se nezobrazí; nabízí se vždy nejvyšší verze. PC verze stejný údaj (`/api/app`) používá, aby uživateli nahlásila novější verzi. Nahrání nové verze z Windows:
 
 ```
-scp dist\LumenSetup-1.1.0.exe mican@mican-server:/tmp/
-ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/LumenSetup-1.1.0.exe /var/lib/lumen/app/LumenSetup-1.1.0.exe"
+scp dist\LumenSetup-1.1.1.exe mican@mican-server:/tmp/
+ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/LumenSetup-1.1.1.exe /var/lib/lumen/app/LumenSetup-1.1.1.exe"
 ```
 
 Android APK se nahrává stejně:

@@ -115,6 +115,7 @@ def main():
         "--exclude-module", "Cryptodome.SelfTest",
         "--hidden-import", "backend.main", "--hidden-import", "backend.music",
         "--collect-submodules", "uvicorn", "--collect-all", "imageio_ffmpeg", "--collect-all", "ytmusicapi",
+        "--collect-all", "webview",  # vlastní okno (WebView2), včetně DLL pro WinForms
         *collect,
     )
     app_dir = DIST / "Lumen"

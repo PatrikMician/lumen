@@ -3,8 +3,9 @@
 Všechno běží lokálně (YouTube vidí IP uživatele, ne server). Klíče a denní limit platí stejně jako na webu:
 denní limit se počítá v aplikaci, klíče ověřuje a žádosti vyřizuje server Lumenu (KEY_SERVER).
 - Server (FastAPI) běží na náhodném portu jen na 127.0.0.1.
-- Okno je Microsoft Edge v režimu aplikace (--app) s vlastním profilem; když se zavře, Lumen skončí.
-  Bez Edge/Chrome se otevře výchozí prohlížeč a malé okénko „Lumen běží“.
+- Okno je vlastní okno aplikace (pywebview + Microsoft WebView2, stejný engine jako Edge); když se zavře, Lumen skončí.
+  Když WebView2 v systému chybí, Lumen ho doinstaluje (oficiální instalátor od Microsoftu). Teprve když to nejde,
+  použije okno prohlížeče v režimu aplikace (Edge, Chrome, Brave…), úplně nakonec výchozí prohlížeč.
 - yt-dlp je přibalený jako obyčejná složka (ne v exe), takže se dá aktualizovat: nová verze z PyPI
   se stáhne do %LOCALAPPDATA%\\Lumen\\pylib a použije se od dalšího spuštění.
 - `Lumen.exe --uninstall` odinstaluje (volá ho záznam v Aplikacích Windows).
@@ -23,7 +24,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 LOCAL = Path(os.getenv("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "Lumen"
 PYLIB = LOCAL / "pylib"
 INSTANCE = LOCAL / "instance.json"
@@ -169,26 +170,152 @@ def start_server(port: int):
 # --------------------------------------------------------------------------
 # Okno
 # --------------------------------------------------------------------------
+# Prohlížeče, které umí okno aplikace (--app); Firefox to neumí.
+APP_BROWSERS = ("msedge", "chrome", "brave", "vivaldi", "chromium", "browser")  # browser.exe = Yandex
+
+
+def _reg_value(root, key: str, name: str = ""):
+    import winreg
+
+    try:
+        with winreg.OpenKey(root, key) as k:
+            return winreg.QueryValueEx(k, name)[0]
+    except OSError:
+        return None
+
+
+def _default_browser() -> str | None:
+    """Výchozí prohlížeč Windows (UserChoice → příkaz pro otevření odkazu)."""
+    import winreg
+
+    prog = _reg_value(winreg.HKEY_CURRENT_USER,
+                      r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice", "ProgId")
+    cmd = prog and _reg_value(winreg.HKEY_CLASSES_ROOT, rf"{prog}\shell\open\command")
+    if not cmd:
+        return None
+    m = re.match(r'\s*"([^"]+)"|\s*(\S+)', cmd)
+    return (m.group(1) or m.group(2)) if m else None
+
+
 def find_browser():
+    """Prohlížeč pro okno aplikace: výchozí, když umí --app, jinak Edge, Chrome, Brave… (cesty i registr App Paths).
+    Bez nich Lumen otevře výchozí prohlížeč jako obyčejnou kartu."""
+    import winreg
+
+    candidates = []
+    try:
+        candidates.append(_default_browser())
+    except Exception:  # noqa: BLE001
+        pass
+    for exe in ("msedge.exe", "chrome.exe", "brave.exe", "vivaldi.exe", "chromium.exe"):
+        for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            candidates.append(_reg_value(root, rf"Software\Microsoft\Windows\CurrentVersion\App Paths\{exe}"))
     pf86 = os.getenv("PROGRAMFILES(X86)", r"C:\Program Files (x86)")
     pf = os.getenv("PROGRAMFILES", r"C:\Program Files")
     la = os.getenv("LOCALAPPDATA", "")
-    for path in (
-        rf"{pf86}\Microsoft\Edge\Application\msedge.exe",
-        rf"{pf}\Microsoft\Edge\Application\msedge.exe",
-        rf"{la}\Microsoft\Edge\Application\msedge.exe",
-        rf"{pf}\Google\Chrome\Application\chrome.exe",
-        rf"{pf86}\Google\Chrome\Application\chrome.exe",
-        rf"{la}\Google\Chrome\Application\chrome.exe",
-    ):
-        if path and Path(path).is_file():
+    for base in (pf86, pf, la):
+        candidates += [
+            rf"{base}\Microsoft\Edge\Application\msedge.exe",
+            rf"{base}\Google\Chrome\Application\chrome.exe",
+            rf"{base}\BraveSoftware\Brave-Browser\Application\brave.exe",
+            rf"{base}\Vivaldi\Application\vivaldi.exe",
+        ]
+    candidates += [shutil.which(n) for n in ("msedge", "chrome", "brave")]
+    for path in candidates:
+        if path and Path(path).stem.lower() in APP_BROWSERS and Path(path).is_file():
             return path
-    return shutil.which("msedge") or shutil.which("chrome")
+    return None
+
+
+# --------------------------------------------------------------------------
+# Vlastní okno: WebView2
+# --------------------------------------------------------------------------
+WEBVIEW2_ID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+WEBVIEW2_SETUP = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"  # oficiální Evergreen Bootstrapper
+
+
+def webview2_version() -> str | None:
+    import winreg
+
+    for root, key in (
+        (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_ID}"),
+        (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_ID}"),
+        (winreg.HKEY_CURRENT_USER, rf"Software\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_ID}"),
+    ):
+        v = _reg_value(root, key, "pv")
+        if v and v != "0.0.0.0":
+            return v
+    return None
+
+
+def _signed_by_microsoft(path: Path) -> bool:
+    ps = ("$s = Get-AuthenticodeSignature -LiteralPath $env:LUMEN_CHECK; "
+          "if ($s.Status -eq 'Valid' -and $s.SignerCertificate.Subject -like '*O=Microsoft Corporation*') { 'ok' }")
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], capture_output=True,
+                             text=True, timeout=60, env={**os.environ, "LUMEN_CHECK": str(path)},
+                             creationflags=0x08000000)
+        return out.stdout.strip() == "ok"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def ensure_webview2() -> bool:
+    """WebView2 je ve Windows 11 i většině Windows 10. Když chybí, stáhne a spustí oficiální instalátor."""
+    if webview2_version():
+        return True
+    log("WebView2 chybí, instaluji ho")
+    message("Lumen", "Lumen si pro své okno doinstaluje komponentu Microsoft WebView2.\n"
+                     "Potrvá to asi minutu, pak se Lumen otevře sám.")
+    setup = LOCAL / "MicrosoftEdgeWebview2Setup.exe"
+    try:
+        with urllib.request.urlopen(WEBVIEW2_SETUP, timeout=60) as r:
+            setup.write_bytes(r.read())
+        if not _signed_by_microsoft(setup):
+            log("WebView2: instalátor není podepsaný Microsoftem, nespouštím ho")
+            return False
+        subprocess.run([str(setup), "/silent", "/install"], timeout=600)
+    except Exception as e:  # noqa: BLE001
+        log(f"WebView2: instalace se nepovedla: {type(e).__name__}: {e}")
+    finally:
+        setup.unlink(missing_ok=True)
+    version = webview2_version()
+    log(f"WebView2: {version or 'pořád chybí'}")
+    return bool(version)
+
+
+def run_app_window(port: int) -> bool:
+    """Vlastní okno Lumenu. Čeká, dokud ho uživatel nezavře. False = okno se otevřít nepodařilo."""
+    try:
+        import webview
+
+        webview.settings["ALLOW_DOWNLOADS"] = True  # „Uložit“ uloží soubor do Stažených souborů
+        webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+        webview.create_window("Lumen", f"http://127.0.0.1:{port}/", width=1240, height=860, min_size=(420, 560),
+                              background_color="#1B1730")
+        # private_mode=False + vlastní složka: přihlášení klíčem a nastavení zůstanou i po zavření
+        webview.start(gui="edgechromium", private_mode=False, storage_path=str(LOCAL / "webview"))
+        return True
+    except Exception as e:  # noqa: BLE001
+        log(f"Vlastní okno se nepodařilo otevřít: {type(e).__name__}: {e}")
+        return False
+
+
+def show(port: int):
+    """Okno Lumenu: vlastní (WebView2), záložně okno prohlížeče v režimu aplikace, nakonec karta v prohlížeči."""
+    if ensure_webview2() and run_app_window(port):
+        return
+    window = open_window(port)
+    if window is None:
+        keep_alive_window(port)
+    else:
+        window.wait()
 
 
 def open_window(port: int) -> subprocess.Popen | None:
     browser = find_browser()
     url = f"http://127.0.0.1:{port}/"
+    log(f"okno: {browser or 'žádný prohlížeč s režimem aplikace, otevírám výchozí prohlížeč'}")
     if not browser:
         import webbrowser
         webbrowser.open(url)
@@ -256,7 +383,7 @@ def main():
     try:
         info = json.loads(INSTANCE.read_text("utf-8"))
         if alive(int(info["port"])):
-            open_window(int(info["port"]))
+            show(int(info["port"]))
             return
     except Exception:  # noqa: BLE001
         pass
@@ -282,12 +409,8 @@ def main():
     threading.Thread(target=update_ytdlp, daemon=True).start()
     log(f"běží na http://127.0.0.1:{port}/")
 
-    window = open_window(port)
     try:
-        if window is None:
-            keep_alive_window(port)
-        else:
-            window.wait()
+        show(port)
     finally:
         INSTANCE.unlink(missing_ok=True)
         server.should_exit = True
