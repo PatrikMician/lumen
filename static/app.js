@@ -870,6 +870,7 @@
       banner.innerHTML = "";
       msgs.forEach((m) => { const p = document.createElement("p"); p.textContent = m; banner.append(p); });
       banner.hidden = msgs.length === 0;
+      renderSupport(h);
       loadApp(h);
     } catch { /* server ještě startuje */ }
   }
@@ -888,11 +889,37 @@
       $("#banner").hidden = false;
       return;
     }
-    const card = $("#appCard");
-    if (!a.windows || !/Windows/i.test(navigator.userAgent)) { card.hidden = true; return; }
-    card.href = a.windows.url;
-    $("#appCardText").textContent = `Běží přímo na tvém počítači, hudba i stahování jsou rychlejší. Verze ${a.windows.version}, ${fmtBytes(a.windows.size)}.`;
-    card.hidden = false;
+    const ua = navigator.userAgent;
+    const ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    const android = /Android/i.test(ua);
+    const tiles = [
+      ["windows", $("#appWindows"), $("#appWindowsMeta"), !ios && !android],
+      ["android", $("#appAndroid"), $("#appAndroidMeta"), !ios],
+    ];
+    let shown = 0;
+    for (const [key, tile, meta, fits] of tiles) {
+      const info = a[key];
+      tile.hidden = !info || !fits;
+      if (tile.hidden) continue;
+      tile.href = info.url;
+      meta.textContent = `Verze ${info.version} · ${fmtBytes(info.size)}`;
+      shown += 1;
+    }
+    $("#appAndroid").classList.toggle("first", android);  // na Androidu je jeho dlaždice první
+    $("#apps").hidden = shown === 0;
+  }
+
+  /* Kontakt pro podporu (Nastavení): e-mail s předvyplněnou verzí, ať se problém dá dohledat */
+  function renderSupport(h) {
+    const box = $("#supportGroup");
+    box.hidden = !h.support;
+    if (!h.support) return;
+    const { name, email } = h.support;
+    const where = h.desktop ? "Lumen pro PC" : "web Lumenu";
+    const body = `\n\n---\n${where}, yt-dlp ${h.ytdlp}\n${navigator.userAgent}`;
+    $("#supportMail").href = `mailto:${email}?subject=${encodeURIComponent("Lumen – podpora")}&body=${encodeURIComponent(body)}`;
+    const mail = Object.assign(document.createElement("a"), { href: `mailto:${email}`, textContent: email });
+    $("#supportLine").replaceChildren(name ? `Provozovatel: ${name} · ` : "", mail);
   }
 
   /* ---------- Pro music.js ---------- */

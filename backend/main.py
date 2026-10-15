@@ -29,8 +29,15 @@ from yt_dlp.version import __version__ as YTDLP_VERSION
 
 from . import keyrequests, music, quota, remotekeys
 
-APP_DIR = Path(os.getenv("APP_DIR") or quota.DATA_DIR / "app")  # server: instalátory PC verze (LumenSetup-<verze>.exe)
-APP_NAME_RE = re.compile(r"LumenSetup-(\d+(?:\.\d+){1,3})\.exe")
+APP_DIR = Path(os.getenv("APP_DIR") or quota.DATA_DIR / "app")  # server: aplikace ke stažení (viz APP_FILES)
+# platforma -> (vzor názvu souboru, typ při stažení); nabízí se nejvyšší verze
+APP_FILES = {
+    "windows": (re.compile(r"LumenSetup-(\d+(?:\.\d+){1,3})\.exe"), "application/octet-stream"),
+    "android": (re.compile(r"Lumen-(\d+(?:\.\d+){1,3})\.apk"), "application/vnd.android.package-archive"),
+}
+# kontakt pro podporu (Nastavení a Nápověda na webu i v PC verzi)
+SUPPORT_NAME = os.getenv("SUPPORT_NAME", "Patrik Mičian").strip()
+SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "micipapatrmi@gmail.com").strip()
 
 # --------------------------------------------------------------------------
 # Nastavení (jde měnit proměnnými prostředí, viz README)
@@ -397,6 +404,7 @@ def health():
         "ffmpeg": bool(FFMPEG),
         "deno": any(shutil.which(r) for r in JS_RUNTIMES),  # jakýkoli JavaScript runtime pro YouTube
         "desktop": DESKTOP,
+        "support": {"name": SUPPORT_NAME, "email": SUPPORT_EMAIL} if SUPPORT_EMAIL else None,
         "impersonate": bool(impersonate_target()),
         "browser_cookies": ALLOW_BROWSER_COOKIES,
         "auth": bool(AUTH_PASSWORD),
@@ -568,11 +576,12 @@ def remote_increase(body: RemoteIncreaseIn, request: Request, background: Backgr
 
 
 # --- Stažení PC verze -------------------------------------------------------------
-def latest_app():
-    """Nejnovější instalátor v APP_DIR jako (verze, cesta), nebo None."""
+def latest_app(platform: str = "windows"):
+    """Nejnovější soubor aplikace pro platformu v APP_DIR jako (verze, cesta), nebo None."""
+    pattern = APP_FILES[platform][0]
     found = []
-    for f in (APP_DIR.glob("LumenSetup-*.exe") if APP_DIR.is_dir() else []):
-        m = APP_NAME_RE.fullmatch(f.name)
+    for f in (APP_DIR.iterdir() if APP_DIR.is_dir() else []):
+        m = pattern.fullmatch(f.name)
         if m and f.is_file():
             found.append((tuple(int(x) for x in m.group(1).split(".")), m.group(1), f))
     if not found:
@@ -583,22 +592,22 @@ def latest_app():
 
 @app.get("/api/app")
 def app_info():
-    """Server: je ke stažení PC verze? PC verze: je na serveru novější verze?"""
+    """Server: které aplikace jsou ke stažení? PC verze: je na serveru novější verze?"""
     if DESKTOP:
         return remotekeys.app_update()
-    latest = latest_app()
-    if not latest:
-        return {"windows": None}
-    version, path = latest
-    return {"windows": {"version": version, "size": path.stat().st_size, "url": "/api/app/windows"}}
+    out = {}
+    for platform in APP_FILES:
+        latest = latest_app(platform)
+        out[platform] = {"version": latest[0], "size": latest[1].stat().st_size, "url": f"/api/app/{platform}"} if latest else None
+    return out
 
 
-@app.get("/api/app/windows")
-def app_download():
-    latest = None if DESKTOP else latest_app()
+@app.get("/api/app/{platform}")
+def app_download(platform: str):
+    latest = None if DESKTOP or platform not in APP_FILES else latest_app(platform)
     if not latest:
-        raise HTTPException(404, "Lumen pro Windows teď není ke stažení.")
-    return FileResponse(latest[1], filename=latest[1].name, media_type="application/octet-stream")
+        raise HTTPException(404, "Tahle aplikace teď není ke stažení.")
+    return FileResponse(latest[1], filename=latest[1].name, media_type=APP_FILES[platform][1])
 
 
 # --- Schválení žádosti odkazem z e-mailu -----------------------------------------

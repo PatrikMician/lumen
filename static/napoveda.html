@@ -16,7 +16,7 @@
       document.documentElement.dataset.accent = s.accent || "amber";
     } catch (e) {}
   </script>
-  <link rel="stylesheet" href="/style.css?v=14">
+  <link rel="stylesheet" href="/style.css?v=15">
   <style>
     .help-page { max-width: 760px; margin: 0 auto; padding: 36px 20px 80px; }
     .help-back { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); text-decoration: none; font-size: 14px; margin-bottom: 22px; }
@@ -67,10 +67,23 @@
 
     <div class="help-foot">
       <strong>Nepomohlo to?</strong> Napiš provozovateli Lumenu a přilož <strong>kód chyby</strong> a její <strong>text</strong>. Podle toho se chyba najde nejrychleji.
+      <span id="support" hidden><br>Kontakt: <span id="supportName"></span> <a id="supportMail" href="#"></a></span>
     </div>
   </div>
 
   <script src="/help.js?v=1"></script>
+  <script>
+  // kontakt pro podporu (stejný jako v Nastavení)
+  fetch("/api/health").then((r) => r.json()).then((h) => {
+    if (!h.support) return;
+    document.getElementById("supportName").textContent = h.support.name ? h.support.name + ", " : "";
+    const a = document.getElementById("supportMail");
+    a.href = "mailto:" + h.support.email + "?subject=" + encodeURIComponent("Lumen – podpora");
+    a.textContent = h.support.email;
+    a.style.color = "var(--accent)";
+    document.getElementById("support").hidden = false;
+  }).catch(() => {});
+  </script>
   <script>
   (() => {
     "use strict";

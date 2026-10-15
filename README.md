@@ -82,7 +82,9 @@ Důležité: **aplikace je bez hesla otevřená komukoliv, kdo zná adresu.** Na
 | `MUSIC_DIRECT` | `1` | `1` = nejdřív zkusit přímé čtení zvuku z YouTube, při 403 přejít na stažení do mezipaměti; `0` = rovnou přes mezipaměť. |
 | `MUSIC_CACHE_DIR` | `DATA_DIR/music-cache` | Mezipaměť stažených skladeb. |
 | `MUSIC_CACHE_MB` | `1024` | Největší velikost mezipaměti, nejdéle nehrané skladby se mažou. |
-| `APP_DIR` | `DATA_DIR/app` | Instalátory PC verze ke stažení z webu (`LumenSetup-<verze>.exe`). |
+| `APP_DIR` | `DATA_DIR/app` | Aplikace ke stažení z webu: `LumenSetup-<verze>.exe` (Windows) a `Lumen-<verze>.apk` (Android). |
+| `SUPPORT_NAME` | `Patrik Mičian` | Jméno v bloku Podpora (Nastavení a Nápověda). |
+| `SUPPORT_EMAIL` | `micipapatrmi@gmail.com` | Kontaktní e-mail pro podporu. Prázdné = blok Podpora se neukáže. |
 | `JS_RUNTIMES` | `deno` | JavaScript runtime pro YouTube (`deno,node,bun,quickjs`). PC verze používá `deno,node,bun`. |
 | `KEY_SERVER` | prázdné | Jen PC verze: adresa serveru Lumenu, který ověřuje klíče a vyřizuje žádosti. |
 
@@ -215,11 +217,18 @@ python -m venv .venv-desktop
 
 Výsledek je `dist\LumenSetup-<verze>.exe` (asi 80 MB, po instalaci asi 150 MB).
 
-**Stažení z webu:** web Lumenu nabízí na stránce Stáhnout kartu „Lumen pro Windows“ (jen ve Windows prohlížeči), když je ve složce `APP_DIR` (výchozí `/var/lib/lumen/app`) instalátor `LumenSetup-<verze>.exe`; nabízí se nejvyšší verze. PC verze stejný údaj (`/api/app`) používá, aby uživateli nahlásila novější verzi. Nahrání nové verze z Windows:
+**Stažení z webu:** web Lumenu ukazuje na stránce Stáhnout sekci „Lumen jako aplikace“ s kartami podle toho, co je ve složce `APP_DIR` (výchozí `/var/lib/lumen/app`): „Lumen pro Windows“ pro `LumenSetup-<verze>.exe` (ne na telefonu) a „Lumen pro Android“ pro `Lumen-<verze>.apk` (ne na iPhonu; na Androidu je první). Karta platformy bez souboru se nezobrazí; nabízí se vždy nejvyšší verze. PC verze stejný údaj (`/api/app`) používá, aby uživateli nahlásila novější verzi. Nahrání nové verze z Windows:
 
 ```
 scp dist\LumenSetup-1.1.0.exe mican@mican-server:/tmp/
 ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/LumenSetup-1.1.0.exe /var/lib/lumen/app/LumenSetup-1.1.0.exe"
+```
+
+Android APK se nahrává stejně:
+
+```
+scp Lumen-1.0.0.apk mican@mican-server:/tmp/
+ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/Lumen-1.0.0.apk /var/lib/lumen/app/Lumen-1.0.0.apk"
 ```
 
 Starší verze ve složce nevadí (nabízí se nejvyšší), můžeš je smazat. Verze je v `desktop/lumen_desktop.py` a `desktop/setup_app.py` (`APP_VERSION`). Instalátor není podepsaný, Windows SmartScreen proto při prvním spuštění zobrazí varování (Další informace → Přesto spustit).

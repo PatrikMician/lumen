@@ -393,16 +393,36 @@ select:disabled { opacity: .5; }
 /* Logo vedle nápisu lumen na úvodní stránce */
 .wordmark-logo { width: 1.15em; height: 1.15em; margin-left: -.15em; flex: none; }
 
-/* Lumen pro Windows ke stažení */
-.app-card {
-  display: flex; align-items: center; gap: 14px;
-  margin: 8px 0 18px; padding: 12px 16px;
-  border: 1px solid var(--line); border-radius: 16px; background: var(--surface);
-  text-decoration: none; color: var(--text);
+/* Lumen jako aplikace (Windows, Android) */
+.apps { margin: 34px 0 8px; }
+.apps-title { font: 500 22px/1.2 var(--font-display); margin-bottom: 12px; text-align: center; }
+.apps-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.app-tile {
+  display: grid; grid-template-columns: auto 1fr; grid-template-areas: "icon info" "btn btn"; grid-template-rows: 1fr auto; gap: 14px;
+  padding: 16px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface);
+  text-decoration: none; color: var(--text); transition: border-color .15s, transform .15s;
 }
-.app-card:hover { border-color: var(--accent); }
-.app-card .ico { color: var(--accent); }
-.app-card-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.app-tile:hover, .app-tile:focus-visible { border-color: var(--accent); transform: translateY(-2px); }
+.app-tile.first { order: -1; }
+.app-icon { grid-area: icon; display: grid; place-items: center; width: 54px; height: 54px; border-radius: 16px; }
+.app-icon .ico { width: 30px; height: 30px; }
+.app-icon.win { background: #0078d4; color: #fff; --app-ink: #0078d4; }
+.app-icon.droid { background: #3ddc84; color: #073042; --app-ink: #3ddc84; }
+.app-icon.droid .ico { stroke: #073042; }
+.app-info { grid-area: info; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.app-info strong { font-size: 16px; }
+.app-meta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 2px; }
+.app-btn {
+  grid-area: btn; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px 18px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-weight: 600;
+}
+.app-btn .ico { width: 18px; height: 18px; }
+
+/* Podpora v Nastavení */
+.support-line { margin-top: 6px; }
+.support-line a { color: var(--accent); }
+.support-btn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; flex: none; }
+.support-btn .ico { width: 18px; height: 18px; }
 .banner a { color: var(--accent); }
 
 /* Žádost o klíč */
