@@ -20,6 +20,8 @@ def setup_env():
         "MAX_PARALLEL": "2",
         "ALLOW_BROWSER_COOKIES": "0",
         "IMPERSONATE": "",  # curl_cffi pro Android není
+        "MUSIC_DIRECT": "0",  # hudba vždy přes mezipaměť: celý soubor s délkou hraje ve WebView telefonu spolehlivě
+        "MUSIC_PROGRESSIVE": "0",
         "PUBLIC_URL": "",
     }
     for k, v in defaults.items():

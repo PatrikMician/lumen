@@ -150,6 +150,7 @@ def setup_env():
         "ALLOW_BROWSER_COOKIES": "1",  # prohlížeč je na stejném počítači, přihlášení z něj dává smysl
         "JS_RUNTIMES": "deno,node,bun",
         "PUBLIC_URL": "",
+        "LUMEN_LOG": str(LOCAL / "lumen.log"),
     }
     for k, v in defaults.items():
         os.environ.setdefault(k, v)

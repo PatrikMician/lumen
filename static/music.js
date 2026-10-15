@@ -231,6 +231,12 @@
       } catch { /* necháme obecnou hlášku */ }
     }
     if (current() !== t) return;
+    if (audio.error && t.src === "online") {
+      // kód přehrávače: 2 = síť, 3 = dekódování, 4 = formát; do hlášky i do logu aplikace
+      msg += ` (přehrávač: ${audio.error.code}${audio.error.message ? ", " + audio.error.message : ""})`;
+      fetch("/api/music/client-error", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: t.id, code: audio.error.code, message: audio.error.message || "" }) }).catch(() => {});
+    }
     L.toast(msg, true);
     if (errorsInRow < 3 && index < queue.length - 1) setTimeout(() => next(), 2500);
   });

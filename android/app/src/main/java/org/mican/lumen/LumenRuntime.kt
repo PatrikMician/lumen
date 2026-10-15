@@ -147,11 +147,14 @@ object LumenRuntime {
             put("HOME", ctx.filesDir.absolutePath)
             put("TMPDIR", ctx.cacheDir.absolutePath)
             put("LUMEN_PORT", port.toString())
+            put("LUMEN_LOG", logFile(ctx).absolutePath)
             put("LUMEN_APP_VERSION", info.versionName ?: "")
             put("DATA_DIR", File(ctx.filesDir, "data").absolutePath)
             put("DOWNLOAD_DIR", File(ctx.filesDir, "downloads").absolutePath)
             put("FFMPEG_PATH", File(native, "libffmpeg.so").absolutePath)
             put("JS_RUNTIMES", "quickjs:" + File(native, "libqjs.so").absolutePath)
+            // zkušební sestavení: KLÍČ=hodnota;KLÍČ=hodnota (třeba MUSIC_REQUIRE_KEY=0)
+            BuildConfig.TEST_ENV.split(";").filter { "=" in it }.forEach { put(it.substringBefore("="), it.substringAfter("=")) }
         }
         return pb.start()
     }

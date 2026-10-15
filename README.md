@@ -80,6 +80,7 @@ Důležité: **aplikace je bez hesla otevřená komukoliv, kdo zná adresu.** Na
 | `MUSIC_BROWSE_PER_HOUR` | `300` | Dotazů do hudebního katalogu na prohlížeč za hodinu. |
 | `MUSIC_TRACKS_PER_HOUR` | `120` | Spuštěných skladeb na prohlížeč za hodinu. |
 | `MUSIC_DIRECT` | `1` | `1` = nejdřív zkusit přímé čtení zvuku z YouTube, při 403 přejít na stažení do mezipaměti; `0` = rovnou přes mezipaměť. |
+| `MUSIC_PROGRESSIVE` | `1` | `1` = skladbu z mezipaměti posílat už během stahování; `0` = až celou (s délkou a přetáčením, Android verze). |
 | `MUSIC_CACHE_DIR` | `DATA_DIR/music-cache` | Mezipaměť stažených skladeb. |
 | `MUSIC_CACHE_MB` | `1024` | Největší velikost mezipaměti, nejdéle nehrané skladby se mažou. |
 | `APP_DIR` | `DATA_DIR/app` | Aplikace ke stažení z webu: `LumenSetup-<verze>.exe` (Windows) a `Lumen-<verze>.apk` (Android). |
@@ -240,6 +241,8 @@ APK `Lumen-<verze>.apk`: Lumen běží celý v telefonu (yt-dlp, ffmpeg i server
 - Python 3.12, ffmpeg, QuickJS (JavaScript pro YouTube) a yt-dlp dodává knihovna [youtubedl-android](https://github.com/JunkFood02/youtubedl-android) 0.18.1. yt-dlp se jednou denně aktualizuje z GitHubu, nová verze platí od dalšího spuštění.
 - Backend Lumenu běží v telefonu jako samostatný proces Pythonu (`android/py/lumen_android.py`) na 127.0.0.1, okno je WebView se stejným rozhraním jako web.
 - V telefonu je **pydantic 1** (pydantic 2 potřebuje nativní knihovnu, která pro Android není), balíčky jsou jen čistý Python (`android/requirements-android.txt`).
+- Hudba se v telefonu pouští až celá stažená do mezipaměti (`MUSIC_DIRECT=0`, `MUSIC_PROGRESSIVE=0`): přehrávač WebView na skutečném telefonu postupně posílaný zvuk bez délky odmítal (E182). Start skladby proto trvá pár sekund, příprava předem (po dotyku) to zkracuje.
+- V Nastavení → Podpora je odkaz **Zobrazit záznam (log)** (jen v aplikacích, `/api/log`), chyby přehrávače se do něj zapisují s kódem.
 - Stažené soubory se ukládají do **Stažené soubory/Lumen**. Odkaz jde do Lumenu poslat přes „Sdílet“ z YouTube.
 - Lumen běží na pozadí (oznámení „Lumen běží“), ukončí se tlačítkem v oznámení.
 - Android 10 a novější, telefony ARM (arm64-v8a, armeabi-v7a). APK má asi 100 MB.
@@ -248,7 +251,7 @@ APK `Lumen-<verze>.apk`: Lumen běží celý v telefonu (yt-dlp, ffmpeg i server
 
 ```
 python android/build_android.py             # dist/Lumen-<verze>.apk pro telefony
-python android/build_android.py --emulator  # dist/Lumen-<verze>-emulator.apk (x86_64) na zkoušení
+python android/build_android.py --emulator  # dist/Lumen-<verze>-emulator.apk (x86_64) na zkoušení (hudba bez klíče, laditelné WebView)
 ```
 
 Verze je v `android/gradle.properties` (`lumenVersion`, `lumenVersionCode`, při vydání zvýšit obě).

@@ -597,6 +597,19 @@ def latest_app(platform: str = "windows"):
     return version, path
 
 
+@app.get("/api/log", response_class=Response)
+def app_log():
+    """Aplikace (PC, Android): konec záznamu Lumenu pro podporu. Na serveru není."""
+    path = os.getenv("LUMEN_LOG", "")
+    if not DESKTOP or not path or not os.path.isfile(path):
+        raise HTTPException(404, "Záznam tu není.")
+    with open(path, "rb") as f:
+        f.seek(max(0, os.path.getsize(path) - 64 * 1024))
+        text = f.read().decode("utf-8", "replace")
+    text = re.sub(r"\[download\][^\n]*?(?=\[download\]|\n|$)", "", text)  # průběh stahování nic neříká
+    return Response(text, media_type="text/plain; charset=utf-8")
+
+
 @app.get("/api/app")
 def app_info():
     """Server: které aplikace jsou ke stažení? PC verze: je na serveru novější verze?"""

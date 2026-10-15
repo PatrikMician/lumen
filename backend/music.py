@@ -19,6 +19,7 @@ from typing import Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
+from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
@@ -514,6 +515,9 @@ CACHE_DIR = Path(os.getenv("MUSIC_CACHE_DIR", "") or quota.DATA_DIR / "music-cac
 CACHE_MB = int(os.getenv("MUSIC_CACHE_MB", "1024"))
 CACHE_TYPES = {".m4a": "audio/mp4", ".mp4": "audio/mp4", ".webm": "audio/webm", ".opus": "audio/ogg", ".mp3": "audio/mpeg"}
 _use_download = os.getenv("MUSIC_DIRECT", "1") != "1"  # po prvním 403 rovnou přes mezipaměť
+# 0 = skladba se pošle až celá stažená (s délkou a přetáčením). Android: přehrávač WebView na telefonu
+# postupně posílaný zvuk bez délky občas odmítne (E182), v emulátoru i na PC přitom hraje.
+PROGRESSIVE = os.getenv("MUSIC_PROGRESSIVE", "1") == "1"
 _dl_locks: dict = {}
 _dl_locks_guard = threading.Lock()
 
@@ -647,6 +651,19 @@ def music_prepare(request: Request, video_id: str):
     return {"state": "ready"}
 
 
+class ClientError(BaseModel):
+    id: str = ""
+    code: int = 0
+    message: str = ""
+
+
+@router.post("/api/music/client-error")
+def music_client_error(body: ClientError):
+    """Chyba přehrávače v prohlížeči/okně aplikace: jen do logu (server ji jinak nevidí)."""
+    print(f"Hudba: přehrávač nepřehrál {body.id[:20]}: kód {body.code} {body.message[:200]}", flush=True)
+    return {"ok": True}
+
+
 @router.get("/api/music/stream/{video_id}")
 def music_stream(request: Request, video_id: str):
     global _use_download
@@ -672,6 +689,12 @@ def music_stream(request: Request, video_id: str):
             print(f"Hudba: přímé čtení {video_id} vrátilo {status or type(e).__name__} "
                   f"(ip={_deps['media_ip'](info['url'])}), dál přes stažení do mezipaměti", flush=True)
     state = start_download(video_id)
+    if not PROGRESSIVE:
+        state["done"].wait(120)
+        hit = cached_file(video_id)
+        if not hit:
+            raise HTTPException(422, "Skladbu se nepodařilo přehrát: " + (state["error"] or "stažení nedoběhlo"))
+        return serve_cached(hit)
     # počkat na začátek souboru (nebo na konec stažení / chybu), pak hned posílat
     deadline = time.time() + 45
     while time.time() < deadline and not state["done"].is_set():

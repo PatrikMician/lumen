@@ -922,6 +922,7 @@
     $("#supportMail").href = `mailto:${email}?subject=${encodeURIComponent("Lumen – podpora")}&body=${encodeURIComponent(body)}`;
     const mail = Object.assign(document.createElement("a"), { href: `mailto:${email}`, textContent: email });
     $("#supportLine").replaceChildren(name ? `Provozovatel: ${name} · ` : "", mail);
+    $("#logLine").hidden = !h.desktop;
   }
 
   /* ---------- Pro music.js ---------- */

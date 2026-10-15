@@ -113,7 +113,9 @@ def main():
     ensure_keystore(env)
     abis = "x86_64" if args.emulator else "arm64-v8a,armeabi-v7a"
     gradlew = ANDROID / ("gradlew.bat" if os.name == "nt" else "gradlew")
-    subprocess.run([str(gradlew), "--no-daemon", "assembleRelease", f"-Pabis={abis}"], cwd=ANDROID, env=env, check=True)
+    extra = ["-PlumenTestEnv=MUSIC_REQUIRE_KEY=0"] if args.emulator else []  # emulátor: hudba bez klíče, ladění
+    subprocess.run([str(gradlew), "--no-daemon", "assembleRelease", f"-Pabis={abis}", *extra], cwd=ANDROID, env=env,
+                   check=True)
 
     apk = APP_BUILD / "outputs" / "apk" / "release" / "app-release.apk"
     name = f"Lumen-{version()}" + ("-emulator" if args.emulator else "") + ".apk"

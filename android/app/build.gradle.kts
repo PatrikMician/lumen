@@ -12,6 +12,9 @@ val keystoreProps = Properties().apply {
 }
 // ABI: výchozí jsou telefony (ARM). Pro emulátor na PC: -Pabis=x86_64
 val abis = (findProperty("abis") as String? ?: "arm64-v8a,armeabi-v7a").split(",").map { it.trim() }
+// Jen zkušební sestavení pro emulátor (build_android.py --emulator): prostředí serveru navíc a ladění
+val testEnv = findProperty("lumenTestEnv") as String? ?: ""
+val testBuild = testEnv.isNotEmpty()
 
 android {
     namespace = "org.mican.lumen"
@@ -24,6 +27,7 @@ android {
         versionCode = (property("lumenVersionCode") as String).toInt()
         versionName = property("lumenVersion") as String
         ndk { abiFilters += abis }
+        buildConfigField("String", "TEST_ENV", "\"" + testEnv.replace("\"", "") + "\"")
     }
 
     signingConfigs {
@@ -40,6 +44,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            isDebuggable = testBuild
             if (keystoreProps.isNotEmpty()) signingConfig = signingConfigs.getByName("release")
         }
     }
