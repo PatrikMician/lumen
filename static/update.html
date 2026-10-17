@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aktualizace – lumen</title>
+  <link rel="icon" href="/logo-small.svg?v=1" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css?v=16">
+  <script>
+  // stejný motiv a barva jako v Lumenu (Nastavení → Vzhled)
+  (() => {
+    let S = {};
+    try { S = JSON.parse(localStorage.getItem("lumen.settings")) || {}; } catch { /* soukromé okno */ }
+    const t = S.theme && S.theme !== "system" ? S.theme : (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.dataset.theme = t;
+    document.documentElement.dataset.accent = S.accent || "amber";
+  })();
+  </script>
+  <style>
+    body { display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 24px 16px; box-sizing: border-box; background: var(--bg); color: var(--text); }
+    .upd { width: min(440px, 100%); text-align: center; }
+    .upd img { width: 96px; height: 96px; }
+    .upd h1 { font: 500 30px/1.2 var(--font-display); margin: 14px 0 6px; }
+    .upd .bar { height: 12px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: 24px 0 10px; }
+    .upd .bar span { display: block; height: 100%; width: 0; background: var(--accent); border-radius: inherit; transition: width .3s; }
+    .upd .bar.busy span { width: 35%; animation: upd-busy 1.2s ease-in-out infinite alternate; }
+    @keyframes upd-busy { from { margin-left: 0; } to { margin-left: 65%; } }
+    .upd .pct { font-variant-numeric: tabular-nums; }
+    .upd .actions { margin-top: 22px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+    .upd .err { color: var(--danger); }
+  </style>
+</head>
+<body>
+  <main class="upd">
+    <img src="/logo-small.svg?v=1" alt="">
+    <h1>Aktualizace Lumenu</h1>
+    <p class="muted" id="sub">Zjišťuji novou verzi…</p>
+    <div class="bar busy" id="bar"><span></span></div>
+    <p class="muted small pct" id="pct">&nbsp;</p>
+    <div class="actions">
+      <button type="button" class="btn primary" id="install" hidden>Instalovat</button>
+      <button type="button" class="btn" id="retry" hidden>Zkusit znovu</button>
+      <a class="btn" href="/" id="back" hidden>Zpět do Lumenu</a>
+    </div>
+  </main>
+  <script>
+  (() => {
+    const $ = (s) => document.querySelector(s);
+    const bar = $("#bar"), fill = bar.firstElementChild;
+    let timer = null;
+
+    function show(st) {
+      const v = st.version ? ` na verzi ${st.version}` : "";
+      $("#install").hidden = true;
+      $("#retry").hidden = st.phase !== "error";
+      $("#back").hidden = !["error", "ready"].includes(st.phase);
+      bar.classList.toggle("busy", st.phase === "checking" || st.phase === "installing");
+      if (st.phase === "downloading") {
+        fill.style.width = st.percent.toFixed(1) + "%";
+        $("#sub").textContent = `Stahuji aktualizaci${v}…`;
+        $("#pct").textContent = Math.floor(st.percent) + " %";
+      } else if (st.phase === "installing") {
+        $("#sub").textContent = `Instaluji${v}. Lumen se za chvíli sám zavře a znovu otevře.`;
+        $("#pct").textContent = "Neukončuj počítač.";
+      } else if (st.phase === "ready") {
+        fill.style.width = "100%";
+        $("#pct").textContent = "100 %";
+        $("#sub").textContent = `Aktualizace${v} je stažená. Potvrď instalaci v okně telefonu.`;
+        $("#install").hidden = false;
+        install(st);
+      } else if (st.phase === "error") {
+        bar.classList.remove("busy");
+        $("#sub").innerHTML = "";
+        const p = document.createElement("span");
+        p.className = "err";
+        p.textContent = st.error || "Aktualizace se nepovedla.";
+        $("#sub").append(p);
+        $("#pct").innerHTML = "&nbsp;";
+      } else {
+        $("#sub").textContent = "Zjišťuji novou verzi…";
+      }
+      clearTimeout(timer);
+      if (["checking", "downloading", "installing"].includes(st.phase)) timer = setTimeout(poll, 500);
+    }
+
+    let installed = false;
+    function install(st, again) {
+      if (!window.LumenAndroid || (installed && !again)) return;
+      installed = true;
+      window.LumenAndroid.installUpdate(st.file);
+    }
+
+    async function poll() {
+      try { show(await (await fetch("/api/app/update/status")).json()); }
+      catch { timer = setTimeout(poll, 1000); }  // PC: server se při instalaci ukončí
+    }
+
+    async function start() {
+      try {
+        const r = await fetch("/api/app/update/start", { method: "POST" });
+        const st = await r.json();
+        if (!r.ok) throw new Error(st.detail || "Aktualizace teď nejde spustit.");
+        show(st);
+      } catch (e) { show({ phase: "error", error: e.message }); }
+    }
+
+    $("#retry").addEventListener("click", start);
+    $("#install").addEventListener("click", async () => install(await (await fetch("/api/app/update/status")).json(), true));
+    start();
+  })();
+  </script>
+</body>
+</html>

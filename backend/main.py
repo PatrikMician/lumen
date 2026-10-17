@@ -3,6 +3,7 @@
 Spuštění:  python run.py   (viz README.md)
 """
 import base64
+import hashlib
 import html
 import ipaddress
 import os
@@ -27,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from yt_dlp.version import __version__ as YTDLP_VERSION
 
-from . import keyrequests, music, quota, remotekeys
+from . import keyrequests, library, music, quota, remotekeys, updater
 
 APP_DIR = Path(os.getenv("APP_DIR") or quota.DATA_DIR / "app")  # server: aplikace ke stažení (viz APP_FILES)
 # platforma -> (vzor názvu souboru, typ při stažení); nabízí se nejvyšší verze
@@ -411,6 +412,7 @@ def health():
         "deno": any(os.path.isfile(JS_PATHS[r]) if r in JS_PATHS else shutil.which(r) for r in JS_RUNTIMES),  # jakýkoli JavaScript runtime pro YouTube
         "desktop": DESKTOP,
         "platform": PLATFORM,
+        "library": library.enabled(),
         "support": {"name": SUPPORT_NAME, "email": SUPPORT_EMAIL} if SUPPORT_EMAIL else None,
         "impersonate": bool(impersonate_target()),
         "browser_cookies": ALLOW_BROWSER_COOKIES,
@@ -618,8 +620,26 @@ def app_info():
     out = {}
     for platform in APP_FILES:
         latest = latest_app(platform)
-        out[platform] = {"version": latest[0], "size": latest[1].stat().st_size, "url": f"/api/app/{platform}"} if latest else None
+        out[platform] = {"version": latest[0], "size": latest[1].stat().st_size, "url": f"/api/app/{platform}",
+                         "sha256": file_sha256(latest[1])} if latest else None
     return out
+
+
+_sha_cache: dict = {}
+
+
+def file_sha256(path: Path) -> str:
+    """Kontrolní součet souboru ke stažení (aplikace si podle něj ověří aktualizaci); drží se podle času změny."""
+    st = path.stat()
+    key = (str(path), st.st_mtime, st.st_size)
+    if key not in _sha_cache:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        _sha_cache.clear()  # stačí poslední verze každé platformy
+        _sha_cache[key] = h.hexdigest()
+    return _sha_cache[key]
 
 
 @app.get("/api/app/{platform}")
@@ -868,6 +888,11 @@ def run_download(jid: str, url: str, body: DownloadIn):
         files[jid] = f
         job.update(status="done", stage="Hotovo", percent=100.0, speed=None, eta=None,
                    filename=f.name, size=f.stat().st_size)
+        if library.enabled():  # aplikace: stažená hudba se sama uloží do knihovny (Hudba → V zařízení)
+            try:
+                library.add_file(f)
+            except OSError as e:
+                print(f"Knihovna: {f.name} se nepodařilo uložit: {e}", flush=True)
     except Exception as e:
         quota.refund(jid)  # nepovedené nebo zrušené stažení se do denního limitu nepočítá
         if jid in cancelled:
@@ -1193,6 +1218,8 @@ music.configure(rate_check=rate_check, current_key=current_key, base_opts=base_o
                 friendly=friendly, daily_limit=DAILY_LIMIT, open_media=open_media, stream_media=stream_media,
                 media_status=media_status, media_ip=media_ip, upstream_error=UPSTREAM_ERROR)
 app.include_router(music.router)
+app.include_router(library.router)
+app.include_router(updater.router)
 
 # Statické soubory musí být připojené jako poslední, aby nepřebily /api.
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

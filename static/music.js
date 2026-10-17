@@ -52,7 +52,7 @@
 
   /* Místní skladba z playlistu nese jen cestu: soubor se dohledá v načtené knihovně (záložka V zařízení). */
   function withFile(t) {
-    if (t.src !== "local" || t.file || t.handle) return t;
+    if (t.src !== "local" || t.file || t.handle || t.url) return t;
     const hit = local.find((x) => x.id === t.id);
     return hit ? { ...t, file: hit.file, handle: hit.handle } : t;
   }
@@ -78,8 +78,8 @@
     renderQueue();
     markNow();
     // src a play() musí proběhnout hned v kliknutí (bez await), jinak je Safari na iPhonu zablokuje
-    if (t.src === "online" || t.file) {
-      audio.src = t.src === "online" ? "/api/music/stream/" + encodeURIComponent(t.id) : fileUrl(t.file);
+    if (t.src === "online" || t.file || t.url) {
+      audio.src = t.src === "online" ? "/api/music/stream/" + encodeURIComponent(t.id) : t.url || fileUrl(t.file);
       if (autoplay) startPlay();
       afterLoad(t);
       return;
@@ -816,12 +816,45 @@
   $("#mLocalPlay").addEventListener("click", () => playList(filteredLocal(), 0));
   $("#mLocalShuffle").addEventListener("click", () => playList(shuffleInPlace([...filteredLocal()]), 0));
   $("#mLocalClear").addEventListener("click", async () => {
-    local = [];
+    local = local.filter((t) => t.id.startsWith("lib:"));  // knihovna Lumenu zůstává
     dirHandle = null;
     await idb("delete").catch(() => {});
     $("#mReconnect").hidden = true;
     renderLocal();
   });
+
+  /* Knihovna Lumenu (jen aplikace PC a Android): složka, kam se ukládá stažená hudba, s importem ze zařízení */
+  const LIB = "Knihovna Lumenu/";
+  async function loadLibrary(quiet = true) {
+    let d;
+    try { d = await L.api("/api/library"); } catch { return; }
+    $("#mLib").hidden = !d.enabled;
+    if (!d.enabled) return;
+    $("#mLibOpen").hidden = !d.can_open;
+    $("#mLibNote").textContent = `Stažená hudba se sem ukládá sama (${d.dir}). Skladby ze zařízení sem přidáš importem.`;
+    const tracks = d.tracks.map((x) => ({ ...localTrack(null, LIB + x.name), id: "lib:" + x.name,
+      url: "/api/library/file/" + encodeURIComponent(x.name) }));
+    local = local.filter((t) => !t.id.startsWith("lib:"));
+    setLocal(tracks, true);
+    if (!quiet && !tracks.length) L.toast("Knihovna je zatím prázdná.");
+  }
+  $("#mLibImport").addEventListener("change", async (e) => {
+    const files = [...e.target.files];
+    e.target.value = "";
+    if (!files.length) return;
+    const form = new FormData();
+    files.forEach((f) => form.append("files", f, f.name));
+    L.toast(`Importuji ${files.length} ${files.length === 1 ? "skladbu" : "skladeb"}…`);
+    try {
+      const r = await fetch("/api/library/import", { method: "POST", body: form });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || "Import se nepovedl.");
+      L.toast(`Importováno: ${d.added.length}${d.skipped.length ? `, přeskočeno (není hudba): ${d.skipped.length}` : ""}.`);
+      loadLibrary();
+    } catch (err) { L.toast(err.message, true); }
+  });
+  $("#mLibOpen").addEventListener("click", () => fetch("/api/library/open", { method: "POST" }).catch(() => {}));
+  loadLibrary();
 
   $("#mFiles").addEventListener("change", (e) => {
     const files = [...e.target.files].filter((f) => AUDIO_RE.test(f.name) || f.type.startsWith("audio/"));
@@ -1149,6 +1182,7 @@
     if (parts[1] === "local") {
       setSource("local");
       renderLocal();
+      loadLibrary();  // nově stažené skladby
       return;
     }
     if (parts[1] === "playlists" || parts[1] === "my") {

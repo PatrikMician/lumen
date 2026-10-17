@@ -2,7 +2,8 @@
 
 Bez administrátorských práv: rozbalí přibalený payload.zip do %LOCALAPPDATA%\\Programs\\Lumen, vytvoří zástupce
 v nabídce Start (a volitelně na ploše) a zapíše Lumen do Aplikací Windows (HKCU), odkud jde odinstalovat.
-`LumenSetup.exe --silent` nainstaluje bez okna (pro testy).
+`LumenSetup.exe --silent` nainstaluje bez okna (pro testy). `LumenSetup.exe --update` (spouští ho Lumen při
+aktualizaci): počká, až se Lumen ukončí, nainstaluje bez otázek s ukazatelem průběhu a Lumen znovu spustí.
 """
 import os
 import subprocess
@@ -12,7 +13,7 @@ import time
 import zipfile
 from pathlib import Path
 
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.2.0"
 PAYLOAD = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / "payload.zip"
 TARGET = Path(os.getenv("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "Programs" / "Lumen"
 START_MENU = Path(os.getenv("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Lumen.lnk"
@@ -133,7 +134,52 @@ def gui():
     root.mainloop()
 
 
+def wait_for_lumen(seconds: int = 30):
+    """Aktualizace: Lumen se po spuštění instalátoru sám ukončí; když ne, ukončí se natvrdo."""
+    end = time.time() + seconds
+    while lumen_running() and time.time() < end:
+        time.sleep(0.5)
+    if lumen_running():
+        subprocess.run(["taskkill", "/F", "/IM", "Lumen.exe"], capture_output=True, creationflags=0x08000000)
+        time.sleep(1)
+
+
+def update_gui():
+    import tkinter as tk
+    from tkinter import ttk
+
+    root = tk.Tk()
+    root.title("Aktualizace Lumenu")
+    root.geometry("420x150")
+    root.resizable(False, False)
+    root.attributes("-topmost", True)
+    frame = ttk.Frame(root, padding=20)
+    frame.pack(fill="both", expand=True)
+    ttk.Label(frame, text=f"Aktualizuji Lumen na verzi {APP_VERSION}…", font=("Segoe UI", 12, "bold")).pack(anchor="w")
+    bar = ttk.Progressbar(frame, maximum=1000)
+    bar.pack(fill="x", pady=14)
+    status = ttk.Label(frame, text="Čekám, až se Lumen zavře…")
+    status.pack(anchor="w")
+
+    def worker():
+        try:
+            wait_for_lumen()
+            root.after(0, status.config, {"text": "Instaluji…"})
+            exe = install(DESKTOP.exists(), lambda d, t: root.after(0, bar.config, {"value": d * 1000 // t}))
+        except Exception as e:  # noqa: BLE001
+            root.after(0, status.config, {"text": f"Aktualizace se nepovedla: {e}"})
+            return
+        subprocess.Popen([str(exe)], cwd=str(exe.parent))
+        root.after(800, root.destroy)
+
+    threading.Thread(target=worker, daemon=True).start()
+    root.mainloop()
+
+
 def main():
+    if "--update" in sys.argv:
+        update_gui()
+        return
     if "--silent" in sys.argv:
         started = time.time()
         exe = install(desktop="--no-desktop" not in sys.argv)

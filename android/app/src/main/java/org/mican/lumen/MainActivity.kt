@@ -18,7 +18,9 @@ import android.provider.MediaStore
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.provider.Settings
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.MimeTypeMap
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
@@ -35,6 +37,8 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLDecoder
@@ -49,6 +53,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var retry: Button
     private var loadedPort = 0
     private var sharedUrl: String? = null
+    private var openUpdate = false
     private var fileCallback: ValueCallback<Array<Uri>>? = null
 
     private val listener: (LumenRuntime.State) -> Unit = { render(it) }
@@ -67,6 +72,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         buildUi()
         sharedUrl = sharedText(intent)
+        openUpdate = intent?.action == UpdateWorker.ACTION_UPDATE
+        UpdateWorker.schedule(this)
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
@@ -84,6 +91,9 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         sharedText(intent)?.let { url -> if (loadedPort != 0) fillUrl(url) else sharedUrl = url }
+        if (intent.action == UpdateWorker.ACTION_UPDATE) {
+            if (loadedPort != 0) web.loadUrl("http://127.0.0.1:$loadedPort/update.html") else openUpdate = true
+        }
     }
 
     override fun onDestroy() {
@@ -131,6 +141,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             setDownloadListener { url, _, disposition, mime, _ -> save(url, disposition, mime) }
+            addJavascriptInterface(Bridge(), "LumenAndroid")
         }
         status = TextView(this).apply {
             setTextColor(Color.parseColor("#C9C3E0"))
@@ -178,7 +189,8 @@ class MainActivity : ComponentActivity() {
             }
             is LumenRuntime.State.Ready -> if (s.port != loadedPort) {
                 loadedPort = s.port
-                web.loadUrl("http://127.0.0.1:${s.port}/")
+                web.loadUrl("http://127.0.0.1:${s.port}/" + if (openUpdate) "update.html" else "")
+                openUpdate = false
             }
             is LumenRuntime.State.Failed -> {
                 loadedPort = 0
@@ -189,6 +201,26 @@ class MainActivity : ComponentActivity() {
                 status.text = "Lumen se nepodařilo spustit.\n\n${s.message.take(1200)}"
             }
         }
+    }
+
+    /** Pro stránku aktualizace: instalace stažené verze (APK z UPDATE_DIR). */
+    inner class Bridge {
+        @JavascriptInterface
+        fun installUpdate(path: String) = runOnUiThread { installApk(path) }
+    }
+
+    private fun installApk(path: String) {
+        val dir = LumenRuntime.updateDir(this).canonicalFile
+        val apk = File(path).canonicalFile
+        if (apk.parentFile != dir || !apk.isFile || !apk.name.endsWith(".apk")) return
+        if (!packageManager.canRequestPackageInstalls()) {
+            Toast.makeText(this, "Povol Lumenu instalovat aplikace a pak klepni na Instalovat.", Toast.LENGTH_LONG).show()
+            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            return
+        }
+        val uri = FileProvider.getUriForFile(this, "$packageName.files", apk)
+        startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     // ----------------------------------------------------------------------

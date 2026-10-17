@@ -66,6 +66,8 @@ object LumenRuntime {
 
     fun logFile(ctx: Context) = File(ctx.filesDir, "lumen.log")
 
+    fun updateDir(ctx: Context) = File(ctx.externalCacheDir ?: ctx.cacheDir, "update")
+
     private fun run(ctx: Context) {
         try {
             set(State.Starting("Připravuji Python a ffmpeg (poprvé to chvíli trvá)…"))
@@ -148,6 +150,9 @@ object LumenRuntime {
             put("TMPDIR", ctx.cacheDir.absolutePath)
             put("LUMEN_PORT", port.toString())
             put("LUMEN_LOG", logFile(ctx).absolutePath)
+            // knihovna hudby (stažená + import) a stažené aktualizace; obojí bez oprávnění k úložišti
+            ctx.getExternalFilesDir(android.os.Environment.DIRECTORY_MUSIC)?.let { put("MUSIC_LIBRARY_DIR", it.absolutePath) }
+            put("UPDATE_DIR", updateDir(ctx).absolutePath)
             put("LUMEN_APP_VERSION", info.versionName ?: "")
             put("DATA_DIR", File(ctx.filesDir, "data").absolutePath)
             put("DOWNLOAD_DIR", File(ctx.filesDir, "downloads").absolutePath)

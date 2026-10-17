@@ -418,6 +418,19 @@ select:disabled { opacity: .5; }
 }
 .app-btn .ico { width: 18px; height: 18px; }
 
+/* Přepnutí sekce tažením prstu */
+.view.swipe-left { animation: swipe-in-left .22s ease-out; }
+.view.swipe-right { animation: swipe-in-right .22s ease-out; }
+@keyframes swipe-in-left { from { transform: translateX(36px); opacity: .4; } to { transform: none; opacity: 1; } }
+@keyframes swipe-in-right { from { transform: translateX(-36px); opacity: .4; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .view.swipe-left, .view.swipe-right { animation: none; } }
+
+/* Knihovna hudby v aplikaci (Hudba → V zařízení) */
+.m-lib { border: 1px solid var(--line); border-radius: 18px; background: var(--surface); padding: 14px 16px; margin-bottom: 14px; }
+.m-lib-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.m-lib-head strong { font-size: 16px; margin-right: auto; }
+.m-lib .m-local-note { margin: 8px 0 0; }
+
 /* Podpora v Nastavení */
 .support-line { margin-top: 6px; }
 .support-line a { color: var(--accent); }

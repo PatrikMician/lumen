@@ -87,7 +87,10 @@ Důležité: **aplikace je bez hesla otevřená komukoliv, kdo zná adresu.** Na
 | `SUPPORT_NAME` | `Patrik Mičian` | Jméno v bloku Podpora (Nastavení a Nápověda). |
 | `SUPPORT_EMAIL` | `micipapatrmi@gmail.com` | Kontaktní e-mail pro podporu. Prázdné = blok Podpora se neukáže. |
 | `JS_RUNTIMES` | `deno` | JavaScript runtime pro YouTube (`deno,node,bun,quickjs`). PC verze používá `deno,node,bun`. |
-| `KEY_SERVER` | prázdné | Jen PC verze: adresa serveru Lumenu, který ověřuje klíče a vyřizuje žádosti. |
+| `KEY_SERVER` | prázdné | Jen aplikace (PC, Android): adresa serveru Lumenu, který ověřuje klíče, vyřizuje žádosti a nabízí aktualizace. |
+| `MUSIC_LIBRARY_DIR` | prázdné | Jen aplikace: složka knihovny hudby (stažená hudba + import). PC `~/Music/Lumen`, Android `Android/data/org.mican.lumen/files/Music`. |
+| `UPDATE_DIR` | `DATA_DIR/update` | Jen aplikace: kam se stahuje aktualizace. |
+| `LUMEN_LOG` | prázdné | Jen aplikace: soubor záznamu, který ukáže Nastavení → Podpora → Zobrazit záznam. |
 
 ### Varianta A: Docker
 ```
@@ -221,15 +224,15 @@ Výsledek je `dist\LumenSetup-<verze>.exe` (asi 80 MB, po instalaci asi 150 MB).
 **Stažení z webu:** web Lumenu ukazuje na stránce Stáhnout sekci „Lumen jako aplikace“ s kartami podle toho, co je ve složce `APP_DIR` (výchozí `/var/lib/lumen/app`): „Lumen pro Windows“ pro `LumenSetup-<verze>.exe` (ne na telefonu) a „Lumen pro Android“ pro `Lumen-<verze>.apk` (ne na iPhonu; na Androidu je první). Karta platformy bez souboru se nezobrazí; nabízí se vždy nejvyšší verze. PC verze stejný údaj (`/api/app`) používá, aby uživateli nahlásila novější verzi. Nahrání nové verze z Windows:
 
 ```
-scp dist\LumenSetup-1.1.1.exe mican@mican-server:/tmp/
-ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/LumenSetup-1.1.1.exe /var/lib/lumen/app/LumenSetup-1.1.1.exe"
+scp dist\LumenSetup-1.2.0.exe mican@mican-server:/tmp/
+ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/LumenSetup-1.2.0.exe /var/lib/lumen/app/LumenSetup-1.2.0.exe"
 ```
 
 Android APK se nahrává stejně:
 
 ```
-scp Lumen-1.0.0.apk mican@mican-server:/tmp/
-ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/Lumen-1.0.0.apk /var/lib/lumen/app/Lumen-1.0.0.apk"
+scp Lumen-1.1.0.apk mican@mican-server:/tmp/
+ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/Lumen-1.1.0.apk /var/lib/lumen/app/Lumen-1.1.0.apk"
 ```
 
 Starší verze ve složce nevadí (nabízí se nejvyšší), můžeš je smazat. Verze je v `desktop/lumen_desktop.py` a `desktop/setup_app.py` (`APP_VERSION`). Instalátor není podepsaný, Windows SmartScreen proto při prvním spuštění zobrazí varování (Další informace → Přesto spustit).
@@ -259,6 +262,22 @@ Verze je v `android/gradle.properties` (`lumenVersion`, `lumenVersionCode`, při
 **Podpisový klíč:** při prvním sestavení se vytvoří `~/.lumen-android/keystore/lumen-release.jks` a `android/keystore.properties` (obojí mimo git). **Zálohuj je**: aktualizace se dá nainstalovat přes starou verzi jen se stejným klíčem, jinak by ji uživatelé museli nejdřív odinstalovat.
 
 **Stažení z webu:** APK nahraj do `APP_DIR` jako `Lumen-<verze>.apk` (příkaz výše u PC verze), web pak ukáže kartu „Lumen pro Android“. Aplikace sama nabídne novou verzi, když je na serveru vyšší.
+
+## Aplikace bez serveru a aktualizace
+
+PC i Android verze běží bez serveru. Server Lumenu stačí zapnout jen při vydání nové verze (úspora elektřiny):
+
+- **Klíče:** ověřený klíč platí dál, i když je server vypnutý (mezipaměť až rok, `OFFLINE_GRACE` v `backend/remotekeys.py`). Bez serveru nejde přihlásit nový klíč ani o klíč požádat. Po nedostupném serveru se další dotaz zkusí až za 10 minut, ať aplikace nečeká na timeout.
+- **Kontrola na pozadí:** PC verze si při spuštění vytvoří naplánovanou úlohu Windows `LumenUpdate` (jen pro uživatele, bez práv správce), která každé 4 hodiny spustí `Lumen.exe --check-update`. Android verze se ptá přes WorkManager každé 4 hodiny (jen s internetem). Když server neodpovídá, nic se neděje. Nová verze → okno (PC) nebo oznámení (Android) „Je dostupná aktualizace Lumenu, doporučujeme aktualizovat hned“, nejvýš 2× denně.
+- **Aktualizace:** stránka `/update.html` (z oznámení, z pruhu v aplikaci nebo `Lumen.exe --update`) stáhne novou verzi s ukazatelem průběhu a ověří kontrolní součet (`sha256` v `/api/app`). PC spustí `LumenSetup-<verze>.exe --update`: Lumen se zavře, nová verze se nainstaluje a Lumen se znovu otevře. Android otevře instalaci APK (poprvé je potřeba povolit Lumenu „instalovat neznámé aplikace“).
+- **Vydání nové verze:** zvýšit verzi (`APP_VERSION` v `desktop/lumen_desktop.py` a `desktop/setup_app.py`, `lumenVersion` a `lumenVersionCode` v `android/gradle.properties`), sestavit, nahrát do `APP_DIR` (příkazy výše), zapnout server a nechat ho běžet, dokud se lidé neaktualizují.
+- Odinstalace PC verze naplánovanou úlohu smaže.
+
+## Knihovna hudby v aplikacích
+
+PC a Android verze mají v Hudbě → V zařízení **Knihovnu Lumenu**: složku (`MUSIC_LIBRARY_DIR`), kam se sama ukládá stažená hudba a kam jde tlačítkem **Importovat skladby** nakopírovat hudbu ze zařízení. Skladby z knihovny se hned objeví v seznamu a hrají přímo ze složky. Na PC tlačítko **Otevřít složku** otevře Průzkumník. Na webu (server) knihovna není.
+
+Na telefonu jde mezi sekcemi (Stáhnout → Hudba → Převod → Weby → Nastavení) přepínat tažením prstu doleva a doprava, na webu i v Android aplikaci.
 
 ## Právní poznámka
 

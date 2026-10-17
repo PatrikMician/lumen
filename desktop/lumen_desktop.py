@@ -9,6 +9,9 @@ denní limit se počítá v aplikaci, klíče ověřuje a žádosti vyřizuje se
 - yt-dlp je přibalený jako obyčejná složka (ne v exe), takže se dá aktualizovat: nová verze z PyPI
   se stáhne do %LOCALAPPDATA%\\Lumen\\pylib a použije se od dalšího spuštění.
 - `Lumen.exe --uninstall` odinstaluje (volá ho záznam v Aplikacích Windows).
+- Aktualizace: server Lumenu je zapnutý jen při vydání, proto naplánovaná úloha Windows „LumenUpdate“ každé
+  4 hodiny spustí `Lumen.exe --check-update` (jen dotaz na server, nic dalšího). Když je nová verze, nabídne ji;
+  `Lumen.exe --update` otevře stránku aktualizace s průběhem (stáhne instalátor a spustí ho s --update).
 """
 import hashlib
 import json
@@ -24,7 +27,9 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.2.0"
+KEY_SERVER = "https://lumen.mican.dpdns.org"
+UPDATE_TASK = "LumenUpdate"
 LOCAL = Path(os.getenv("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "Lumen"
 PYLIB = LOCAL / "pylib"
 INSTANCE = LOCAL / "instance.json"
@@ -143,7 +148,7 @@ def setup_env():
         "DOWNLOAD_DIR": str(LOCAL / "downloads"),
         "DAILY_LIMIT": "5",            # stejně jako na webu; klíče ověřuje server Lumenu
         "MUSIC_REQUIRE_KEY": "1",
-        "KEY_SERVER": "https://lumen.mican.dpdns.org",
+        "KEY_SERVER": KEY_SERVER,
         "LUMEN_APP_VERSION": APP_VERSION,
         "KEEP_HOURS": "6",             # soubor si prohlížeč hned uloží do Stažených souborů
         "MAX_PARALLEL": "3",
@@ -151,6 +156,8 @@ def setup_env():
         "JS_RUNTIMES": "deno,node,bun",
         "PUBLIC_URL": "",
         "LUMEN_LOG": str(LOCAL / "lumen.log"),
+        "MUSIC_LIBRARY_DIR": str(Path.home() / "Music" / "Lumen"),  # knihovna: stažená hudba + import
+        "UPDATE_DIR": str(LOCAL / "update"),
     }
     for k, v in defaults.items():
         os.environ.setdefault(k, v)
@@ -285,14 +292,14 @@ def ensure_webview2() -> bool:
     return bool(version)
 
 
-def run_app_window(port: int) -> bool:
+def run_app_window(port: int, path: str = "/") -> bool:
     """Vlastní okno Lumenu. Čeká, dokud ho uživatel nezavře. False = okno se otevřít nepodařilo."""
     try:
         import webview
 
         webview.settings["ALLOW_DOWNLOADS"] = True  # „Uložit“ uloží soubor do Stažených souborů
         webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
-        webview.create_window("Lumen", f"http://127.0.0.1:{port}/", width=1240, height=860, min_size=(420, 560),
+        webview.create_window("Lumen", f"http://127.0.0.1:{port}{path}", width=1240, height=860, min_size=(420, 560),
                               background_color="#1B1730")
         # private_mode=False + vlastní složka: přihlášení klíčem a nastavení zůstanou i po zavření
         webview.start(gui="edgechromium", private_mode=False, storage_path=str(LOCAL / "webview"))
@@ -302,20 +309,20 @@ def run_app_window(port: int) -> bool:
         return False
 
 
-def show(port: int):
+def show(port: int, path: str = "/"):
     """Okno Lumenu: vlastní (WebView2), záložně okno prohlížeče v režimu aplikace, nakonec karta v prohlížeči."""
-    if ensure_webview2() and run_app_window(port):
+    if ensure_webview2() and run_app_window(port, path):
         return
-    window = open_window(port)
+    window = open_window(port, path)
     if window is None:
         keep_alive_window(port)
     else:
         window.wait()
 
 
-def open_window(port: int) -> subprocess.Popen | None:
+def open_window(port: int, path: str = "/") -> subprocess.Popen | None:
     browser = find_browser()
-    url = f"http://127.0.0.1:{port}/"
+    url = f"http://127.0.0.1:{port}{path}"
     log(f"okno: {browser or 'žádný prohlížeč s režimem aplikace, otevírám výchozí prohlížeč'}")
     if not browser:
         import webbrowser
@@ -367,6 +374,7 @@ def uninstall():
         winreg.DeleteKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen")
     except OSError:
         pass
+    subprocess.run(["schtasks", "/Delete", "/F", "/TN", UPDATE_TASK], capture_output=True, creationflags=0x08000000)
     install_dir = Path(sys.executable).resolve().parent
     targets = [str(install_dir)] + ([str(LOCAL)] if remove_data else [])
     # běžící exe se samo smazat nedá: po ukončení to udělá cmd
@@ -376,15 +384,62 @@ def uninstall():
 
 
 # --------------------------------------------------------------------------
+# Aktualizace na pozadí
+# --------------------------------------------------------------------------
+def ensure_update_task():
+    """Naplánovaná úloha (jen pro tohoto uživatele, bez práv správce): kontrola aktualizace každé 4 hodiny."""
+    if not FROZEN:
+        return
+    exe = Path(sys.executable).resolve()
+    q = subprocess.run(["schtasks", "/Query", "/TN", UPDATE_TASK, "/XML"], capture_output=True, text=True,
+                       creationflags=0x08000000)
+    if q.returncode == 0 and str(exe).lower() in q.stdout.lower():
+        return
+    r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "HOURLY", "/MO", "4", "/TN", UPDATE_TASK,
+                        "/TR", f'"{exe}" --check-update'], capture_output=True, text=True, creationflags=0x08000000)
+    log(f"úloha {UPDATE_TASK}: {'vytvořena' if r.returncode == 0 else 'nevytvořena: ' + (r.stderr or r.stdout).strip()}")
+
+
+def check_update():
+    """`Lumen.exe --check-update`: jen se zeptá serveru; když je nová verze, nabídne aktualizaci (nejvýš 2× denně)."""
+    import ctypes
+
+    try:
+        with urllib.request.urlopen(f"{os.getenv('KEY_SERVER', KEY_SERVER)}/api/app", timeout=8) as r:
+            info = (json.load(r) or {}).get("windows")
+    except Exception:  # noqa: BLE001 - server je většinou vypnutý, to je v pořádku
+        return
+    if not info or _version_tuple(info.get("version", "")) <= _version_tuple(APP_VERSION):
+        return
+    seen_file = LOCAL / "update_check.json"
+    try:
+        seen = json.loads(seen_file.read_text("utf-8"))
+    except Exception:  # noqa: BLE001
+        seen = {}
+    if seen.get("version") == info["version"] and time.time() - seen.get("asked", 0) < 12 * 3600:
+        return
+    seen_file.write_text(json.dumps({"version": info["version"], "asked": time.time()}), "utf-8")
+    yes = 6
+    answer = ctypes.windll.user32.MessageBoxW(
+        None, f"Je dostupná aktualizace Lumenu {info['version']} (máš {APP_VERSION}).\n"
+              "Doporučujeme aktualizovat hned. Aktualizovat teď?", "Aktualizace Lumenu", 0x24 | 0x40000 | 0x10000)
+    if answer == yes:
+        subprocess.Popen([sys.executable, "--update"], cwd=str(Path(sys.executable).parent))
+
+
 def main():
     if "--uninstall" in sys.argv:
         uninstall()
         return
+    if "--check-update" in sys.argv:
+        check_update()
+        return
+    page = "/update.html" if "--update" in sys.argv else "/"
     # druhé spuštění: Lumen už běží, jen se otevře další okno
     try:
         info = json.loads(INSTANCE.read_text("utf-8"))
         if alive(int(info["port"])):
-            show(int(info["port"]))
+            show(int(info["port"]), page)
             return
     except Exception:  # noqa: BLE001
         pass
@@ -408,10 +463,11 @@ def main():
         return
     INSTANCE.write_text(json.dumps({"port": port, "pid": os.getpid()}), "utf-8")
     threading.Thread(target=update_ytdlp, daemon=True).start()
+    threading.Thread(target=ensure_update_task, daemon=True).start()
     log(f"běží na http://127.0.0.1:{port}/")
 
     try:
-        show(port)
+        show(port, page)
     finally:
         INSTANCE.unlink(missing_ok=True)
         server.should_exit = True

@@ -118,6 +118,7 @@
 
   /* ---------- Navigace ---------- */
   const ROUTES = ["download", "music", "remux", "sites", "settings"];
+  let swipeDir = null;
   function route() {
     // u hudby za lomítkem následuje podstránka (#/music/album/…), tu si řeší music.js
     const name = location.hash.replace(/^#\/?/, "").split("/")[0] || "download";
@@ -129,8 +130,50 @@
       if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
     });
     if (current === "sites") loadSites();
+    if (swipeDir) {
+      const view = $(`.view[data-view="${current}"]`);
+      view.classList.remove("swipe-left", "swipe-right");
+      void view.offsetWidth;  // znovu spustit animaci
+      view.classList.add(swipeDir === "left" ? "swipe-left" : "swipe-right");
+      swipeDir = null;
+      scrollTo(0, 0);
+    }
   }
   addEventListener("hashchange", route);
+
+  /* Přepínání sekcí tažením prstu doleva/doprava (telefon, Android aplikace). Ne v posuvných řadách,
+     polích, přehrávači a u okraje obrazovky (tam je systémové gesto Zpět). */
+  (() => {
+    let sx = 0, sy = 0, st = 0, on = false;
+    const scrollsX = (el) => {
+      for (let n = el; n && n !== document.body; n = n.parentElement) {
+        const ox = getComputedStyle(n).overflowX;
+        if ((ox === "auto" || ox === "scroll") && n.scrollWidth > n.clientWidth + 4) return true;
+      }
+      return false;
+    };
+    const blocked = (el) => !!el.closest("input, textarea, select, [contenteditable], dialog, #mBar, .no-swipe") || scrollsX(el);
+    document.addEventListener("touchstart", (e) => {
+      const t = e.touches[0];
+      on = e.touches.length === 1 && !blocked(e.target) && t.clientX > 24 && t.clientX < innerWidth - 24
+        && !document.querySelector("dialog[open]");
+      if (on) { sx = t.clientX; sy = t.clientY; st = Date.now(); }
+    }, { passive: true });
+    document.addEventListener("touchend", (e) => {
+      if (!on) return;
+      on = false;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - sx, dy = t.clientY - sy;
+      if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.8 || Date.now() - st > 700) return;
+      if (getSelection && String(getSelection())) return;
+      const name = location.hash.replace(/^#\/?/, "").split("/")[0] || "download";
+      const i = Math.max(0, ROUTES.indexOf(name));
+      const j = i + (dx < 0 ? 1 : -1);
+      if (j < 0 || j >= ROUTES.length) return;
+      swipeDir = dx < 0 ? "left" : "right";
+      location.hash = "#/" + ROUTES[j];
+    }, { passive: true });
+  })();
 
   /* ---------- Stahování ---------- */
   const input = $("#urlInput");
@@ -884,9 +927,9 @@
       if (!a.update) return;
       const p = document.createElement("p");
       const droid = h.platform === "android";
-      p.append(`Je dostupná nová verze ${droid ? "Lumenu pro Android" : "Lumenu pro PC"} ${a.update.version} (máš ${a.current}). `);
-      const link = Object.assign(document.createElement("a"), { href: a.update.url, textContent: droid ? "Stáhnout APK" : "Stáhnout instalátor" });
-      p.append(link, droid ? " a otevři ho, nainstaluje se přes stávající verzi." : " a po zavření Lumenu ho spusť.");
+      p.append(`Je dostupná nová verze ${droid ? "Lumenu pro Android" : "Lumenu pro PC"} ${a.update.version} (máš ${a.current}). Doporučujeme aktualizovat hned. `);
+      const link = Object.assign(document.createElement("a"), { href: "/update.html", textContent: "Aktualizovat teď" });
+      p.append(link);
       $("#banner").append(p);
       $("#banner").hidden = false;
       return;

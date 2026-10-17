@@ -27,6 +27,7 @@ android {
         versionCode = (property("lumenVersionCode") as String).toInt()
         versionName = property("lumenVersion") as String
         ndk { abiFilters += abis }
+        buildConfigField("String", "LUMEN_SERVER", "\"https://lumen.mican.dpdns.org\"")
         buildConfigField("String", "TEST_ENV", "\"" + testEnv.replace("\"", "") + "\"")
     }
 
@@ -69,4 +70,5 @@ dependencies {
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-ktx:1.9.3")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 }

@@ -3,7 +3,8 @@
 Seznam klíčů je jen na serveru. PC verze proto klíč pošle serveru (/api/remote/key) spolu se stálým ID
 instalace a server ho přiřadí k tomuhle počítači jako k jednomu zařízení (stejně jako prohlížeč na webu).
 Výsledek se drží v mezipaměti: ověřuje se znovu po CHECK_EVERY, a když server není dostupný, platí poslední
-úspěšné ověření ještě OFFLINE_GRACE. Žádosti o klíč a o víc zařízení se přeposílají serveru, schválení
+úspěšné ověření ještě OFFLINE_GRACE. Server je zapnutý jen občas (při vydání nové verze), aplikace proto
+běží bez něj: ověřený klíč platí dál a po nedostupném serveru se další dotaz zkusí až za RETRY_AFTER. Žádosti o klíč a o víc zařízení se přeposílají serveru, schválení
 e-mailem zůstává stejné. Denní limit stažení se počítá přímo v PC verzi.
 """
 import json
@@ -22,11 +23,13 @@ from . import quota
 KEY_SERVER = os.getenv("KEY_SERVER", "").strip().rstrip("/")
 APP_VERSION = os.getenv("LUMEN_APP_VERSION", "")
 CHECK_EVERY = 6 * 3600
-OFFLINE_GRACE = 7 * 86400
+OFFLINE_GRACE = 365 * 86400
+RETRY_AFTER = 10 * 60  # po nedostupném serveru se další dotaz zkusí až za chvíli (každý by čekal na timeout)
 CACHE_FILE = quota.DATA_DIR / "remote_key.json"
 DEVICE_FILE = quota.DATA_DIR / "device_id"
 _lock = threading.Lock()
 _app_cache = {"ts": 0.0, "data": None}
+_down = {"until": 0.0}
 
 
 def enabled() -> bool:
@@ -46,14 +49,17 @@ def device_id() -> str:
         return value
 
 
-def _request(method: str, path: str, payload: dict = None):
+def _request(method: str, path: str, payload: dict = None, timeout: int = 15):
     """(HTTP kód, JSON). Kód None = server nedostupný."""
+    offline = {"detail": "Server Lumenu teď není dostupný (zapíná se jen občas). Zkus to později."}
+    if time.time() < _down["until"]:
+        return None, offline
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(KEY_SERVER + path, data=data, method=method, headers={
         "Content-Type": "application/json", "Accept": "application/json",
         "User-Agent": f"LumenDesktop/{APP_VERSION or '0'}"})
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
         try:
@@ -62,8 +68,9 @@ def _request(method: str, path: str, payload: dict = None):
             body = {}
         return e.code, body if isinstance(body, dict) else {}
     except Exception as e:  # noqa: BLE001 - bez internetu, DNS, timeout
-        print(f"Klíče: server {KEY_SERVER} nedostupný: {type(e).__name__}: {e}", flush=True)
-        return None, {"detail": "Server Lumenu teď není dostupný. Zkontroluj připojení k internetu a zkus to znovu."}
+        print(f"Server Lumenu {KEY_SERVER} nedostupný: {type(e).__name__}: {e}", flush=True)
+        _down["until"] = time.time() + RETRY_AFTER
+        return None, offline
 
 
 def _load() -> dict:
@@ -128,13 +135,16 @@ def _version(v: str):
     return tuple(int(x) for x in re.findall(r"\d+", v or "")[:4])
 
 
-def app_update() -> dict:
-    """Pro aplikaci (PC, Android): je na serveru novější verze? (výsledek se drží hodinu)"""
+def app_update(force: bool = False) -> dict:
+    """Pro aplikaci (PC, Android): je na serveru novější verze? (výsledek se drží hodinu, nedostupný server 10 min)"""
     now = time.time()
-    if now - _app_cache["ts"] > 3600 or _app_cache["data"] is None:
-        status, data = _request("GET", "/api/app")
-        _app_cache.update(ts=now, data=data if status == 200 else {})
+    if force:
+        _down["until"] = 0.0
+    if force or now - _app_cache["ts"] > 3600 or _app_cache["data"] is None:
+        status, data = _request("GET", "/api/app", timeout=8)
+        _app_cache.update(ts=now if status == 200 else now - 3600 + RETRY_AFTER, data=data if status == 200 else {})
     win = (_app_cache["data"] or {}).get(os.getenv("LUMEN_PLATFORM", "windows"))
     newer = bool(win and APP_VERSION and _version(win.get("version")) > _version(APP_VERSION))
     return {"current": APP_VERSION, "update": {"version": win["version"], "size": win.get("size"),
-                                               "url": KEY_SERVER + win["url"]} if newer else None}
+                                               "sha256": win.get("sha256"), "url": KEY_SERVER + win["url"]}
+            if newer else None}
