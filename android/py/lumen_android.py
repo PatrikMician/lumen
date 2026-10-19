@@ -22,6 +22,8 @@ def setup_env():
         "IMPERSONATE": "",  # curl_cffi pro Android není
         "MUSIC_DIRECT": "0",  # hudba vždy přes mezipaměť: celý soubor s délkou hraje ve WebView telefonu spolehlivě
         "MUSIC_PROGRESSIVE": "0",
+        "MAX_ACTIVE_PER_USER": "0",  # jeden uživatel: Stáhnout vše zařadí celý playlist
+        "MAX_QUEUE": "300",
         "PUBLIC_URL": "",
     }
     for k, v in defaults.items():

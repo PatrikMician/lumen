@@ -1,4 +1,5 @@
-"""Účty Lumenu: e-mail + heslo, přístupový klíč patří účtu, oblíbené skladby se ukládají k účtu.
+"""Účty Lumenu: e-mail + heslo, přístupový klíč patří účtu, k účtu se ukládají oblíbené skladby,
+vlastní playlisty a nastavení (DATA_NAMES).
 
 Web funguje dál i bez účtu (klíč v cookie jednoho prohlížeče). Přihlášený uživatel má klíč účtu na každém
 zařízení, kde se přihlásí; limit zařízení klíče platí dál (každé přihlášené zařízení = jedno zařízení klíče).
@@ -26,7 +27,6 @@ APP_ACCOUNT_FILE = quota.DATA_DIR / "account.json"  # aplikace: přihlášený �
 COOKIE = "lumen_acc"
 SESSION_DAYS = 365
 RESET_TTL = 3600
-MAX_FAVORITES = 5000
 _lock = threading.Lock()
 
 
@@ -107,7 +107,7 @@ def register(email: str, password: str) -> str:
             raise HTTPException(409, "Účet s tímhle e-mailem už existuje. Přihlas se, nebo si obnov heslo.")
         uid = secrets.token_hex(8)
         data["users"][uid] = {"email": email, "pw": hash_password(password), "created": time.time(), "key": "",
-                              "fav": [], "fav_ts": 0}
+                              "data": {}}
         _save(data)
     return uid
 
@@ -168,17 +168,32 @@ def update_user(uid: str, **fields):
             _save(data)
 
 
-def set_favorites(uid: str, items: list, ts: float) -> dict:
-    items = [x for x in items if isinstance(x, dict) and x.get("id")][:MAX_FAVORITES]
+DATA_NAMES = {"favorites", "playlists", "settings"}  # co se ukládá k účtu
+MAX_DATA = 2 * 1024 * 1024  # bajtů JSON na jednu položku
+
+
+def get_data(user: dict, name: str) -> dict:
+    d = (user.get("data") or {}).get(name)
+    if d is None and name == "favorites" and user.get("fav"):  # starší tvar
+        d = {"value": user["fav"], "ts": user.get("fav_ts", 0)}
+    return d or {"value": None, "ts": 0}
+
+
+def set_data(uid: str, name: str, value, ts: float) -> dict:
+    if name not in DATA_NAMES:
+        raise HTTPException(404, "Neznámá data účtu.")
+    if len(json.dumps(value, ensure_ascii=False)) > MAX_DATA:
+        raise HTTPException(413, "Dat je moc (víc než 2 MB).")
     with _lock:
         data = _load()
         u = data["users"].get(uid)
         if not u:
             raise HTTPException(401, "Nejsi přihlášený.")
-        u["fav"] = items
-        u["fav_ts"] = float(ts) if ts else time.time()
+        u.setdefault("data", {})[name] = {"value": value, "ts": float(ts) if ts else time.time()}
+        u.pop("fav", None)
+        u.pop("fav_ts", None)
         _save(data)
-        return {"items": u["fav"], "ts": u["fav_ts"]}
+        return u["data"][name]
 
 
 # --------------------------------------------------------------------------

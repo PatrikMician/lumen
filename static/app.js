@@ -27,9 +27,10 @@
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.accent = S.accent;
   }
-  function saveSettings() {
+  function saveSettings(fromAccount = false) {
     try { localStorage.setItem("lumen.settings", JSON.stringify(S)); } catch { /* soukromé okno */ }
     applyTheme();
+    if (!fromAccount && typeof touchStore === "function") touchStore("settings");
   }
   darkQuery.addEventListener("change", applyTheme);
 
@@ -47,7 +48,7 @@
         const data = await res.json();
         if (data.detail) msg = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
       } catch { /* odpověď nebyla JSON */ }
-      throw new Error(msg);
+      throw Object.assign(new Error(msg), { status: res.status });
     }
     return res.json();
   }
@@ -196,6 +197,7 @@
     renderAccount(a);
     toast(msg);
     dispatchEvent(new CustomEvent("lumen-account", { detail: a }));
+    if (a && a.logged) syncAll(true);  // spojit data ze zařízení s účtem
     loadQuota();
   }
   async function accountSubmit(path, okMsg) {
@@ -244,7 +246,72 @@
   });
   addEventListener("hashchange", checkReset);
   checkReset();
-  loadAccount();
+  loadAccount().then(() => syncAll());
+
+  /* ---------- Data účtu: oblíbené, vlastní playlisty, nastavení ----------
+     Vždy se ukládají v zařízení. Přihlášenému i na server: změna se pošle hned, a když server neběží
+     (aplikace bez serveru), zůstane označená a pošle se sama později (každé 3 minuty a při návratu do okna).
+     Po přihlášení se data ze zařízení spojí s účtem (merge), jinak vyhrává novější verze (ts). */
+  const stores = {};
+  function storeMeta(name) {
+    try { return JSON.parse(localStorage.getItem("lumen.sync." + name)) || { ts: 0, dirty: false }; }
+    catch { return { ts: 0, dirty: false }; }
+  }
+  function setMeta(name, m) { try { localStorage.setItem("lumen.sync." + name, JSON.stringify(m)); } catch { /* plné úložiště */ } }
+  function registerStore(name, s) { stores[name] = s; }
+  let syncTimer = null;
+  function touchStore(name) {
+    setMeta(name, { ts: Date.now() / 1000, dirty: true });
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => syncAll(), 1200);
+  }
+  let syncing = false;
+  async function syncAll(merge = false) {
+    if (syncing || !ACC || !ACC.logged) return;
+    syncing = true;
+    try {
+      for (const [name, s] of Object.entries(stores)) {
+        let m = storeMeta(name);
+        if (merge || !m.dirty) {
+          const remote = await api("/api/account/data/" + name);
+          if (merge && remote.value != null) {
+            const merged = s.merge ? s.merge(s.read(), remote.value) : remote.value;
+            const changed = JSON.stringify(merged) !== JSON.stringify(remote.value);
+            s.write(merged);
+            m = { ts: changed ? Date.now() / 1000 : remote.ts, dirty: changed };
+          } else if (merge) {
+            m = { ts: Date.now() / 1000, dirty: true };  // účet zatím nic nemá: nahrát ze zařízení
+          } else if (remote.ts > m.ts && remote.value != null) {
+            s.write(remote.value);
+            m = { ts: remote.ts, dirty: false };
+          }
+          setMeta(name, m);
+        }
+        if (m.dirty) {
+          await api("/api/account/data/" + name, { method: "PUT", body: { value: s.read(), ts: m.ts } });
+          setMeta(name, { ts: m.ts, dirty: false });
+        }
+      }
+    } catch { /* server neběží: zkusí se znovu později */ } finally { syncing = false; }
+  }
+  setInterval(() => syncAll(), 3 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) syncAll(); });
+
+  // nastavení (vzhled, formáty, …) patří účtu; přihlášení z prohlížeče je vázané na zařízení, to ne
+  registerStore("settings", {
+    read: () => { const { cookiesFrom, ...rest } = S; return rest; },
+    write: (v) => {
+      S = { ...S, ...v };
+      saveSettings(true);
+      $$("[data-setting]").forEach((el) => {
+        const key = el.dataset.setting;
+        if (el.type === "checkbox") el.checked = !!S[key];
+        else if (el.type === "radio") el.checked = el.value === S[key];
+        else el.value = S[key];
+      });
+      updateOptions(); updateHint(); updateSubmitLabel();
+    },
+  });
 
   /* Přepínání sekcí tažením prstu doleva/doprava (telefon, Android aplikace). Ne v posuvných řadách,
      polích, přehrávači a u okraje obrazovky (tam je systémové gesto Zpět). */
@@ -441,7 +508,7 @@
     if (busy) btn.textContent = "Načítám…"; else updateSubmitLabel();
   }
 
-  async function startDownload({ url, title = null, thumbnail = null, mode = null }) {
+  async function startDownload({ url, title = null, thumbnail = null, mode = null, quiet = false }) {
     const res = await api("/api/download", {
       method: "POST",
       body: {
@@ -456,7 +523,7 @@
       },
     });
     seenActive.add(res.id);
-    toast("Přidáno do fronty");
+    if (!quiet) toast("Přidáno do fronty");
     loadQuota();
     if (!mode) {
       input.value = "";
@@ -1078,7 +1145,20 @@
   window.Lumen = {
     api, toast, fmtTime,
     // stažení skladby z přehrávače: vždy jako zvuk ve formátu z nastavení
-    downloadAudio: (track) => startDownload({ url: track.url, title: track.title, thumbnail: track.thumb, mode: "audio" }),
+    downloadAudio: (track, opts = {}) => startDownload({ url: track.url, title: track.title, thumbnail: track.thumb, mode: "audio", quiet: !!opts.quiet }),
+    // celý playlist jako jedna úloha (zvuk ve formátu z nastavení, výsledek ZIP)
+    downloadBatch: async (name, tracks, thumb) => {
+      const res = await api("/api/download/batch", { method: "POST", body: {
+        name, thumbnail: thumb || null, tracks,
+        audio_format: S.audioFormat, audio_bitrate: S.audioBitrate, embed_cover: S.embedCover, cookies_from: S.cookiesFrom || null,
+      } });
+      seenActive.add(res.id);
+      loadQuota();
+      poll();
+      return res;
+    },
+    registerStore: (name, s) => registerStore(name, s),
+    touchStore: (name) => touchStore(name),
     hasKey: () => !!(Q && Q.has_key),
     onQuota: (fn) => quotaListeners.push(fn),
   };

@@ -16,7 +16,7 @@ import time
 import zipfile
 from pathlib import Path
 
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 PAYLOAD = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / "payload.zip"
 TARGET = Path(os.getenv("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "Programs" / "Lumen"
 START_MENU = Path(os.getenv("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Lumen.lnk"

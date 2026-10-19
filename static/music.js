@@ -815,6 +815,14 @@
     return { items: [], ts: 0, dirty: false };
   }
   var fav = loadFav();
+  L.registerStore("favorites", {
+    read: () => fav.items,
+    write: (v) => { fav.items = Array.isArray(v) ? v : []; saveFav(); renderFav(); refreshMine(); },
+    merge: (mine, theirs) => {  // spojit: z účtu + navíc ze zařízení
+      const have = new Set((theirs || []).map(favKey));
+      return [...(theirs || []), ...mine.filter((x) => !have.has(favKey(x)))];
+    },
+  });
   const favKey = (t) => (t.src || "online") + ":" + t.id;
   const isFav = (t) => !!fav && fav.items.some((x) => favKey(x) === favKey(t));
   function saveFav() { try { localStorage.setItem(FAV_KEY, JSON.stringify(fav)); } catch { /* plné úložiště */ } }
@@ -849,13 +857,11 @@
   function toggleFav(t) {
     const on = isFav(t);
     fav.items = on ? fav.items.filter((x) => favKey(x) !== favKey(t)) : [storable(t), ...fav.items];
-    fav.ts = Date.now() / 1000;
-    fav.dirty = true;
     saveFav();
+    L.touchStore("favorites");
     renderFav();
     L.toast(on ? "Odebráno z oblíbených" : "Přidáno do oblíbených");
     if (location.hash === "#/music/my/favorites") pageFavorites();
-    syncFav();
   }
   $("#mFav").addEventListener("click", () => { const t = current(); if (t) toggleFav(t); });
   $("#mTitle").addEventListener("click", () => {
@@ -863,36 +869,6 @@
     if (t && t.src === "online") location.hash = "#/music/track/" + encodeURIComponent(t.id);
   });
 
-  let favSyncing = false;
-  async function syncFav(merge = false) {
-    if (favSyncing) return;
-    favSyncing = true;
-    try {
-      const acc = await L.api("/api/account");
-      if (!acc.logged) return;
-      if (merge || !fav.dirty) {
-        const remote = await L.api("/api/account/favorites");
-        if (merge) {  // po přihlášení: spojit oblíbené ze zařízení s účtem
-          const have = new Set(remote.items.map(favKey));
-          const extra = fav.items.filter((x) => !have.has(favKey(x)));
-          fav = { items: [...remote.items, ...extra], ts: extra.length ? Date.now() / 1000 : remote.ts, dirty: extra.length > 0 };
-        } else if (remote.ts > fav.ts) {
-          fav = { items: remote.items, ts: remote.ts, dirty: false };
-        }
-        saveFav();
-        renderFav();
-        refreshMine();
-      }
-      if (fav.dirty) {
-        const r = await fetch("/api/account/favorites", { method: "PUT", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ items: fav.items, ts: fav.ts }) });
-        if (r.ok) { fav.dirty = false; saveFav(); }  // jinak (server vypnutý) zůstane ke zkusení později
-      }
-    } catch { /* bez serveru: zkusí se znovu */ } finally { favSyncing = false; }
-  }
-  setInterval(() => syncFav(), 3 * 60 * 1000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) syncFav(); });
-  addEventListener("lumen-account", (e) => { if (e.detail && e.detail.logged) syncFav(true); });
   addEventListener("storage", (e) => { if (e.key === FAV_KEY) { fav = loadFav(); renderFav(); } });
 
   /* ---------- Stažení skladby a celých playlistů ---------- */
@@ -920,19 +896,15 @@
     if (!limit) { L.toast("Dnešní limit stažení je vyčerpaný. S přístupovým klíčem limit není.", true); return; }
     const msg = limit < list.length
       ? `Stáhnout prvních ${limit} z ${songs(list.length)} („${name}“)? Víc dnes limit nedovolí.`
-      : `Stáhnout ${songs(list.length)} („${name}“) jako zvuk?`;
+      : `Stáhnout ${songs(list.length)} („${name}“) jako zvuk? Bude to jedna úloha, výsledek dostaneš jako ZIP.`;
     if (!confirm(msg)) return;
     btn.disabled = true;
-    let ok = 0;
-    for (const t of list.slice(0, limit)) {
-      try {
-        await L.downloadAudio({ url: onlineUrl(t), title: [artistNames(t), t.title].filter(Boolean).join(" - "), thumb: t.thumb });
-        ok += 1;
-      } catch (err) { L.toast(err.message, true); break; }
-      await new Promise((r) => setTimeout(r, 300));
-    }
-    btn.disabled = false;
-    if (ok) L.toast(`Ve frontě stahování: ${songs(ok)}`);
+    try {
+      const pick = list.slice(0, limit);
+      const res = await L.downloadBatch(name, pick.map((t) => ({ url: onlineUrl(t), title: [artistNames(t), t.title].filter(Boolean).join(" - ") })),
+        (pick.find((t) => t.thumb) || {}).thumb);
+      L.toast(`„${name}“ je ve frontě jako jedna úloha (${songs(res.count)}). Výsledek bude ZIP se všemi skladbami.`);
+    } catch (err) { L.toast(err.message, true); } finally { btn.disabled = false; }
   }
 
   /* Odkaz z YouTube Music / YouTube vložený do hledání */
@@ -1167,9 +1139,10 @@
   }
   let playlists = loadPlaylists();
 
-  function savePlaylists() {
+  function savePlaylists(fromAccount = false) {
     try {
       localStorage.setItem(PL_KEY, JSON.stringify(playlists));
+      if (!fromAccount) L.touchStore("playlists");
       return true;
     } catch {
       L.toast("Playlist se nepodařilo uložit, úložiště prohlížeče je plné nebo vypnuté.", true);
@@ -1391,6 +1364,19 @@
     markNow();
   }
 
+  L.registerStore("playlists", {
+    read: () => playlists,
+    write: (v) => { playlists = Array.isArray(v) ? v : []; savePlaylists(true); refreshMine(); },
+    merge: (mine, theirs) => {  // stejné id: novější verze; jinak obojí
+      const byId = new Map((theirs || []).map((p) => [p.id, p]));
+      for (const p of mine) {
+        const other = byId.get(p.id);
+        if (!other || (p.updated || p.created || 0) > (other.updated || other.created || 0)) byId.set(p.id, p);
+      }
+      return [...byId.values()].sort((a, b) => (b.created || 0) - (a.created || 0));
+    },
+  });
+
   // změny v jiné záložce prohlížeče
   addEventListener("storage", (e) => { if (e.key === PL_KEY) { playlists = loadPlaylists(); refreshMine(); } });
 
@@ -1454,5 +1440,4 @@
   restoreDir();
   openMusicRoute();
   renderFav();
-  syncFav();
 })();

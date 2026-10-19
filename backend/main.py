@@ -15,10 +15,11 @@ import subprocess
 import threading
 import time
 import uuid
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 import yt_dlp
@@ -608,8 +609,8 @@ class ResetConfirmIn(BaseModel):
     password: str
 
 
-class FavoritesIn(BaseModel):
-    items: list = []
+class DataIn(BaseModel):
+    value: Any = None
     ts: float = 0
 
 
@@ -619,8 +620,10 @@ class RemoteAccountIn(BaseModel):
     device: str = ""
     token: str = ""
     key: str = ""
-    items: list = []
+    name: str = ""
+    value: Any = None
     ts: float = 0
+    write: bool = False
 
 
 def web_account(request: Request):
@@ -767,30 +770,34 @@ def account_reset_confirm(body: ResetConfirmIn):
     return {"ok": True}
 
 
-@app.get("/api/account/favorites")
-def account_favorites(request: Request):
+@app.get("/api/account/data/{name}")
+def account_data(name: str, request: Request):
+    """Data účtu (favorites, playlists, settings) jako {value, ts}; ts = čas poslední změny v sekundách."""
     if DESKTOP:
         a = accounts.app_load()
         if not a.get("token"):
             raise HTTPException(401, "Nejsi přihlášený.")
-        return _remote("/api/remote/account/favorites", {"token": a["token"]})
+        return _remote("/api/remote/account/data", {"token": a["token"], "name": name})
     acc = web_account(request)
     if not acc:
         raise HTTPException(401, "Nejsi přihlášený.")
-    return {"items": acc[1].get("fav", []), "ts": acc[1].get("fav_ts", 0)}
+    if name not in accounts.DATA_NAMES:
+        raise HTTPException(404, "Neznámá data účtu.")
+    return accounts.get_data(acc[1], name)
 
 
-@app.put("/api/account/favorites")
-def account_favorites_set(body: FavoritesIn, request: Request):
+@app.put("/api/account/data/{name}")
+def account_data_set(name: str, body: DataIn, request: Request):
     if DESKTOP:
         a = accounts.app_load()
         if not a.get("token"):
             raise HTTPException(401, "Nejsi přihlášený.")
-        return _remote("/api/remote/account/favorites", {"token": a["token"], "items": body.items, "ts": body.ts})
+        return _remote("/api/remote/account/data", {"token": a["token"], "name": name, "value": body.value,
+                                                    "ts": body.ts, "write": True})
     acc = web_account(request)
     if not acc:
         raise HTTPException(401, "Nejsi přihlášený.")
-    return accounts.set_favorites(acc[0], body.items, body.ts)
+    return accounts.set_data(acc[0], name, body.value, body.ts)
 
 
 # --- Účty pro aplikace (volá je PC a Android verze) ---------------------------------
@@ -840,12 +847,14 @@ def remote_account_key(body: RemoteAccountIn):
     return {"ok": True}
 
 
-@app.post("/api/remote/account/favorites")
-def remote_account_favorites(body: RemoteAccountIn):
+@app.post("/api/remote/account/data")
+def remote_account_data(body: RemoteAccountIn):
     uid, user, _ = _remote_user(body.token)
-    if body.ts:
-        return accounts.set_favorites(uid, body.items, body.ts)
-    return {"items": user.get("fav", []), "ts": user.get("fav_ts", 0)}
+    if body.name not in accounts.DATA_NAMES:
+        raise HTTPException(404, "Neznámá data účtu.")
+    if body.write:
+        return accounts.set_data(uid, body.name, body.value, body.ts)
+    return accounts.get_data(user, body.name)
 
 
 # --- Stažení PC verze -------------------------------------------------------------
@@ -1069,6 +1078,23 @@ def info(body: UrlIn, request: Request):
     }
 
 
+def audio_opts(opts: dict, body) -> dict:
+    """yt-dlp: jen zvuk ve formátu a kvalitě z nastavení, volitelně s obalem."""
+    codec = body.audio_format if body.audio_format in AUDIO_FORMATS else "mp3"
+    pp = {"key": "FFmpegExtractAudio", "preferredcodec": codec}
+    if codec in ("mp3", "m4a", "opus") and body.audio_bitrate in ("128", "192", "256", "320"):
+        pp["preferredquality"] = body.audio_bitrate
+    opts["format"] = "bestaudio/best"
+    opts["postprocessors"] = [pp, {"key": "FFmpegMetadata", "add_metadata": True}]
+    if body.embed_cover and codec in ("mp3", "m4a"):
+        opts["writethumbnail"] = True
+        opts["postprocessors"] += [
+            {"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"},
+            {"key": "EmbedThumbnail"},
+        ]
+    return opts
+
+
 def run_download(jid: str, url: str, body: DownloadIn):
     job = jobs.get(jid)
     if not job:
@@ -1113,18 +1139,7 @@ def run_download(jid: str, url: str, body: DownloadIn):
     )
 
     if body.mode == "audio":
-        codec = body.audio_format if body.audio_format in AUDIO_FORMATS else "mp3"
-        pp = {"key": "FFmpegExtractAudio", "preferredcodec": codec}
-        if codec in ("mp3", "m4a", "opus") and body.audio_bitrate in ("128", "192", "256", "320"):
-            pp["preferredquality"] = body.audio_bitrate
-        opts["format"] = "bestaudio/best"
-        opts["postprocessors"] = [pp, {"key": "FFmpegMetadata", "add_metadata": True}]
-        if body.embed_cover and codec in ("mp3", "m4a"):
-            opts["writethumbnail"] = True
-            opts["postprocessors"] += [
-                {"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"},
-                {"key": "EmbedThumbnail"},
-            ]
+        audio_opts(opts, body)
     else:
         container = body.container if body.container in VIDEO_FORMATS else "mp4"
         cap = f"[height<={int(body.quality)}]" if body.quality.isdigit() else ""
@@ -1186,6 +1201,127 @@ def download(body: DownloadIn, request: Request):
     save_owner(job["id"], request.state.sid)
     executor.submit(run_download, job["id"], url, body)
     return {"id": job["id"]}
+
+
+# --------------------------------------------------------------------------
+# Celý playlist nebo album jako jedna úloha (skladby postupně, výsledek ZIP)
+# --------------------------------------------------------------------------
+MAX_BATCH = 300
+
+
+class BatchTrack(BaseModel):
+    url: str
+    title: Optional[str] = None
+
+
+class BatchIn(BaseModel):
+    name: str
+    tracks: list
+    audio_format: str = "mp3"
+    audio_bitrate: str = "192"
+    embed_cover: bool = False
+    cookies_from: Optional[str] = None
+    thumbnail: Optional[str] = None
+
+
+def run_batch(jid: str, items: list, body: BatchIn):
+    job = jobs.get(jid)
+    if not job:
+        return
+    out_dir = DOWNLOAD_DIR / jid
+    tracks_dir = out_dir / "skladby"
+    tracks_dir.mkdir(parents=True, exist_ok=True)
+    n = len(items)
+    done_files, failed = [], []
+    for i, (url, title) in enumerate(items):
+        if jid in cancelled:
+            break
+        label = f"Skladba {i + 1} z {n}"
+
+        def hook(d, i=i, label=label):
+            if jid in cancelled:
+                raise RuntimeError("cancelled")
+            if d["status"] == "downloading":
+                total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+                pct = (d.get("downloaded_bytes") or 0) / total if total else 0
+                job.update(status="downloading", stage=label, percent=round(min((i + pct) / n * 100, 99.0), 1),
+                           speed=d.get("speed"), eta=None)
+
+        opts = base_opts(body.cookies_from, url)
+        opts.update(outtmpl=str(tracks_dir / f"{i + 1:03d} %(title).110B [%(id)s].%(ext)s"), windowsfilenames=True,
+                    progress_hooks=[hook])
+        audio_opts(opts, body)
+        before = set(tracks_dir.iterdir())
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.extract_info(url, download=True)
+            new = [f for f in tracks_dir.iterdir() if f not in before and f.suffix.lower() not in SKIP_SUFFIXES]
+            if not new:
+                raise RuntimeError("výsledný soubor se nenašel")
+            done_files += new
+        except Exception as e:  # noqa: BLE001 - jedna nedostupná skladba nezastaví celý playlist
+            if jid in cancelled:
+                break
+            quota.refund(f"{jid}-{i}")
+            failed.append(title or url)
+            print(f"Playlist {jid}: skladba {i + 1} ({title or url}) přeskočena: {friendly(e)}", flush=True)
+    if jid in cancelled:
+        for i in range(n):
+            quota.refund(f"{jid}-{i}")
+        job.update(status="cancelled", stage="Zrušeno", speed=None, eta=None)
+        shutil.rmtree(out_dir, ignore_errors=True)
+        return
+    if not done_files:
+        job.update(status="error", stage="Chyba", error="Žádnou skladbu z playlistu se nepodařilo stáhnout.", speed=None)
+        shutil.rmtree(out_dir, ignore_errors=True)
+        return
+    if library.enabled():
+        for f in done_files:
+            try:
+                library.add_file(f)
+            except OSError as e:
+                print(f"Knihovna: {f.name} se nepodařilo uložit: {e}", flush=True)
+    job.update(status="processing", stage="Balím do ZIPu", percent=99.0, speed=None)
+    safe = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", body.name).strip(" .")[:100] or "playlist"
+    zip_path = out_dir / f"{safe}.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as z:  # zvuk je už zkomprimovaný
+        for f in sorted(done_files):
+            z.write(f, re.sub(r"^\d{3} ", "", f.name))
+    shutil.rmtree(tracks_dir, ignore_errors=True)
+    files[jid] = zip_path
+    stage = "Hotovo" if not failed else f"Hotovo, {len(failed)} z {n} skladeb nešlo stáhnout"
+    job.update(status="done", stage=stage, percent=100.0, speed=None, eta=None,
+               filename=zip_path.name, size=zip_path.stat().st_size)
+
+
+@app.post("/api/download/batch")
+def download_batch(body: BatchIn, request: Request):
+    """Celý playlist nebo album jako jedna úloha ve frontě: skladby se stáhnou postupně jako zvuk a výsledek
+    je jeden ZIP (v aplikacích se skladby uloží i do knihovny). Do denního limitu se počítá každá skladba."""
+    items = []
+    for t in body.tracks[:MAX_BATCH]:
+        t = BatchTrack(**t) if isinstance(t, dict) else None
+        if t:
+            items.append((clean_url(t.url), (t.title or "")[:200]))
+    if not items:
+        raise HTTPException(400, "Playlist je prázdný.")
+    check_capacity(request.state.sid)
+    jid = uuid.uuid4().hex[:12]
+    if DAILY_LIMIT > 0 and not current_key(request):
+        who = quota.who(request)
+        for i in range(len(items)):
+            ok, wait = quota.reserve(who, f"{jid}-{i}", DAILY_LIMIT)
+            if not ok:
+                for k in range(i):
+                    quota.refund(f"{jid}-{k}")
+                raise HTTPException(429, f"Na {len(items)} skladeb nestačí denní limit {DAILY_LIMIT} stažení. "
+                                         "Bez limitu stahuješ s přístupovým klíčem (Nastavení).")
+    thumb = body.thumbnail if body.thumbnail and re.match(r"^https?://", body.thumbnail, re.I) else None
+    job = new_job("download", f"{body.name[:200]} ({len(items)} skladeb)", thumb, jid=jid, mode="audio",
+                  owner=request.state.sid)
+    save_owner(job["id"], request.state.sid)
+    executor.submit(run_batch, job["id"], items, body)
+    return {"id": job["id"], "count": len(items)}
 
 
 # --------------------------------------------------------------------------

@@ -27,7 +27,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 KEY_SERVER = "https://lumen.mican.dpdns.org"
 UPDATE_TASK = "LumenUpdate"
 LOCAL = Path(os.getenv("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "Lumen"
@@ -166,6 +166,8 @@ def setup_env():
         "LUMEN_LOG": str(LOCAL / "lumen.log"),
         "MUSIC_LIBRARY_DIR": str(Path.home() / "Music" / "Lumen"),  # knihovna: stažená hudba + import
         "UPDATE_DIR": str(LOCAL / "update"),
+        "MAX_ACTIVE_PER_USER": "0",   # jeden uživatel: Stáhnout vše může zařadit celý playlist najednou
+        "MAX_QUEUE": "300",
     }
     for k, v in defaults.items():
         os.environ.setdefault(k, v)
