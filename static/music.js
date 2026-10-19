@@ -257,6 +257,8 @@
     img.hidden = !t.thumb;
     if (t.thumb) img.src = t.thumb; else img.removeAttribute("src");
     $("#mDownload").hidden = t.src !== "online";
+    $("#mTitle").disabled = t.src !== "online";
+    if (typeof renderFav === "function") renderFav();
     renderPlayState();
     renderTime();
   }
@@ -465,6 +467,7 @@
     play.addEventListener("click", onPlay);
     if (t.src === "online") prepareOnHover(li, t);
     li.append(play);
+    li.append(favButton(t));
     li.append(el("span", "m-track-dur muted small", t.duration ? fmt(t.duration) : ""));
     const menu = el("span", "m-track-actions");
     for (const [label, fn] of actions) {
@@ -479,6 +482,7 @@
 
   function trackActions(t, list) {
     const acts = [["Další", () => addToQueue([t], true)], ["Do fronty", () => addToQueue([t])], ["Do playlistu", () => openPick([t])]];
+    if (t.src === "online") acts.unshift(["Info", () => { location.hash = "#/music/track/" + encodeURIComponent(t.id); }]);
     if (t.src === "online") {
       acts.push(["Stáhnout", async () => {
         try { await L.downloadAudio({ url: onlineUrl(t), title: [artistNames(t), t.title].filter(Boolean).join(" - "), thumb: t.thumb }); }
@@ -699,6 +703,7 @@
       save.append(icon("plus"), document.createTextNode("Uložit jako playlist"));
       save.addEventListener("click", () => openPick(tracks, data.title));
       extra.push(save);
+      if (kind !== "artist") extra.push(downloadAllButton(tracks, data.title));
     }
     const nodes = [backButton(), detailHeader(data, tracks, extra)];
     if (data.description) nodes.push(el("p", "muted small m-desc", data.description));
@@ -719,6 +724,215 @@
     content.replaceChildren(...nodes);
     window.scrollTo({ top: 0 });
     tracks.slice(0, 2).forEach((t) => prepare(t.id));  // album / playlist: první skladby budou hrát hned
+  }
+
+  /* ---------- Detail skladby (jako ve Spotify): obal, údaje, text písně, podobné skladby ---------- */
+  const fmtViews = (n) => n >= 1e9 ? (n / 1e9).toFixed(1).replace(".", ",") + " mld." : n >= 1e6 ? (n / 1e6).toFixed(1).replace(".", ",") + " mil."
+    : n >= 1e3 ? Math.round(n / 1e3) + " tis." : String(n);
+
+  async function pageTrack(token, id) {
+    $("#mFilters").hidden = true;
+    busy();
+    const d = await L.api("/api/music/track/" + encodeURIComponent(id));
+    if (token !== renderToken) return;
+    const t = { ...d, src: "online" };
+    const head = el("div", "m-detail-head m-track-page");
+    const cover = el("span", "m-detail-cover");
+    if (d.thumb) cover.append(Object.assign(el("img"), { alt: "", referrerPolicy: "no-referrer", src: d.thumb }));
+    else cover.append(icon("music"));
+    const info = el("div", "m-detail-info");
+    info.append(el("p", "m-detail-kind muted small", "Skladba"), el("h2", "m-detail-title", d.title));
+    const who = el("p", "m-track-artists");
+    (d.artists || []).forEach((a, i) => {
+      if (i) who.append(", ");
+      if (a.id) who.append(Object.assign(el("a", "link", a.name), { href: "#/music/artist/" + encodeURIComponent(a.id) }));
+      else who.append(a.name);
+    });
+    info.append(who);
+    const meta = [];
+    if (d.album && d.album.name) meta.push(d.album);
+    const facts = [d.duration ? fmt(d.duration) : null, d.published ? d.published.slice(0, 4) : null,
+                   d.views ? fmtViews(d.views) + " přehrání" : null, d.explicit ? "Explicitní" : null].filter(Boolean);
+    const line = el("p", "muted small");
+    if (d.album && d.album.name) {
+      line.append("Album: ");
+      line.append(d.album.id ? Object.assign(el("a", "link", d.album.name), { href: "#/music/album/" + encodeURIComponent(d.album.id) }) : d.album.name);
+      if (facts.length) line.append(" · ");
+    }
+    line.append(facts.join(" · "));
+    info.append(line);
+    const btns = el("div", "m-detail-btns");
+    const play = el("button", "btn primary");
+    play.type = "button";
+    play.append(icon("play"), document.createTextNode("Přehrát"));
+    play.addEventListener("click", () => playList([t, ...(d.related || []).map((r) => ({ ...r, src: "online" }))], 0));
+    const favBtn = favButton(t, true);
+    const dl = el("button", "btn");
+    dl.type = "button";
+    dl.append(icon("download"), document.createTextNode("Stáhnout"));
+    dl.addEventListener("click", () => downloadOne(t));
+    const add = el("button", "btn");
+    add.type = "button";
+    add.append(icon("plus"), document.createTextNode("Do playlistu"));
+    add.addEventListener("click", () => openPick([t]));
+    const queue = el("button", "btn");
+    queue.type = "button";
+    queue.textContent = "Do fronty";
+    queue.addEventListener("click", () => addToQueue([t]));
+    btns.append(play, favBtn, dl, add, queue);
+    info.append(btns);
+    head.append(cover, info);
+    const nodes = [backButton(), head];
+    if (d.lyrics) {
+      const sec = el("section", "m-shelf m-track-lyrics");
+      sec.append(el("h2", "group", "Text písně"));
+      const box = el("pre", "m-lyrics-text muted", "Načítám text…");
+      sec.append(box);
+      nodes.push(sec);
+      L.api("/api/music/lyrics/" + encodeURIComponent(d.lyrics)).then((ly) => {
+        box.textContent = ly.text || "Text k téhle skladbě není.";
+        if (ly.source) sec.append(el("p", "muted small", ly.source));
+      }, () => { box.textContent = "Text se nepodařilo načíst."; });
+    }
+    if (d.related && d.related.length) {
+      const sec = el("section", "m-shelf");
+      const rel = d.related.map((r) => ({ ...r, src: "online" }));
+      sec.append(el("h2", "group", "Podobné skladby"), trackList(rel));
+      nodes.push(sec);
+    }
+    content.replaceChildren(...nodes);
+    window.scrollTo({ top: 0 });
+    prepare(d.id);
+  }
+
+  /* ---------- Oblíbené skladby: v zařízení, s účtem i na serveru (bez serveru se dožene později samo) ---------- */
+  var FAV_KEY = "lumen.favorites";  // var: lišta přehrávače se může vykreslit dřív, než sem kód dojde
+  function loadFav() {
+    try {
+      const d = JSON.parse(localStorage.getItem(FAV_KEY) || "null");
+      if (d && Array.isArray(d.items)) return d;
+    } catch { /* soukromé okno */ }
+    return { items: [], ts: 0, dirty: false };
+  }
+  var fav = loadFav();
+  const favKey = (t) => (t.src || "online") + ":" + t.id;
+  const isFav = (t) => !!fav && fav.items.some((x) => favKey(x) === favKey(t));
+  function saveFav() { try { localStorage.setItem(FAV_KEY, JSON.stringify(fav)); } catch { /* plné úložiště */ } }
+
+  function favButton(t, big = false) {
+    const b = el("button", big ? "btn m-fav" : "icon-btn m-fav");
+    b.type = "button";
+    b.dataset.fav = favKey(t);
+    b.append(icon("heart"));
+    if (big) b.append(el("span", null, ""));
+    b.addEventListener("click", (e) => { e.stopPropagation(); toggleFav(t); });
+    paintFav(b, isFav(t));
+    return b;
+  }
+  function paintFav(b, on) {
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", String(on));
+    b.setAttribute("aria-label", on ? "Odebrat z oblíbených" : "Přidat do oblíbených");
+    b.title = on ? "Odebrat z oblíbených" : "Přidat do oblíbených";
+    const label = b.querySelector("span");
+    if (label) label.textContent = on ? "V oblíbených" : "Oblíbit";
+  }
+  function renderFav() {
+    if (!fav) return;
+    const keys = new Set(fav.items.map(favKey));
+    $$("[data-fav]").forEach((b) => paintFav(b, keys.has(b.dataset.fav)));
+    const t = current();
+    const barBtn = $("#mFav");
+    barBtn.hidden = !t;
+    if (t) { barBtn.dataset.fav = favKey(t); paintFav(barBtn, keys.has(favKey(t))); }
+  }
+  function toggleFav(t) {
+    const on = isFav(t);
+    fav.items = on ? fav.items.filter((x) => favKey(x) !== favKey(t)) : [storable(t), ...fav.items];
+    fav.ts = Date.now() / 1000;
+    fav.dirty = true;
+    saveFav();
+    renderFav();
+    L.toast(on ? "Odebráno z oblíbených" : "Přidáno do oblíbených");
+    if (location.hash === "#/music/my/favorites") pageFavorites();
+    syncFav();
+  }
+  $("#mFav").addEventListener("click", () => { const t = current(); if (t) toggleFav(t); });
+  $("#mTitle").addEventListener("click", () => {
+    const t = current();
+    if (t && t.src === "online") location.hash = "#/music/track/" + encodeURIComponent(t.id);
+  });
+
+  let favSyncing = false;
+  async function syncFav(merge = false) {
+    if (favSyncing) return;
+    favSyncing = true;
+    try {
+      const acc = await L.api("/api/account");
+      if (!acc.logged) return;
+      if (merge || !fav.dirty) {
+        const remote = await L.api("/api/account/favorites");
+        if (merge) {  // po přihlášení: spojit oblíbené ze zařízení s účtem
+          const have = new Set(remote.items.map(favKey));
+          const extra = fav.items.filter((x) => !have.has(favKey(x)));
+          fav = { items: [...remote.items, ...extra], ts: extra.length ? Date.now() / 1000 : remote.ts, dirty: extra.length > 0 };
+        } else if (remote.ts > fav.ts) {
+          fav = { items: remote.items, ts: remote.ts, dirty: false };
+        }
+        saveFav();
+        renderFav();
+        refreshMine();
+      }
+      if (fav.dirty) {
+        const r = await fetch("/api/account/favorites", { method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: fav.items, ts: fav.ts }) });
+        if (r.ok) { fav.dirty = false; saveFav(); }  // jinak (server vypnutý) zůstane ke zkusení později
+      }
+    } catch { /* bez serveru: zkusí se znovu */ } finally { favSyncing = false; }
+  }
+  setInterval(() => syncFav(), 3 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) syncFav(); });
+  addEventListener("lumen-account", (e) => { if (e.detail && e.detail.logged) syncFav(true); });
+  addEventListener("storage", (e) => { if (e.key === FAV_KEY) { fav = loadFav(); renderFav(); } });
+
+  /* ---------- Stažení skladby a celých playlistů ---------- */
+  async function downloadOne(t) {
+    try { await L.downloadAudio({ url: onlineUrl(t), title: [artistNames(t), t.title].filter(Boolean).join(" - "), thumb: t.thumb }); }
+    catch (err) { L.toast(err.message, true); }
+  }
+
+  function downloadAllButton(tracks, name) {
+    const b = el("button", "btn");
+    b.type = "button";
+    b.append(icon("download"), document.createTextNode("Stáhnout vše"));
+    b.addEventListener("click", () => downloadAll(tracks, name, b));
+    return b;
+  }
+
+  async function downloadAll(tracks, name, btn) {
+    const list = tracks.filter((t) => t.src === "online");
+    if (!list.length) { L.toast("Tady nejsou žádné online skladby ke stažení.", true); return; }
+    let limit = list.length;
+    try {
+      const q = await L.api("/api/quota");
+      if (q.enabled && !q.has_key && q.limit > 0) limit = Math.min(limit, q.remaining);
+    } catch { /* bez údaje o limitu */ }
+    if (!limit) { L.toast("Dnešní limit stažení je vyčerpaný. S přístupovým klíčem limit není.", true); return; }
+    const msg = limit < list.length
+      ? `Stáhnout prvních ${limit} z ${songs(list.length)} („${name}“)? Víc dnes limit nedovolí.`
+      : `Stáhnout ${songs(list.length)} („${name}“) jako zvuk?`;
+    if (!confirm(msg)) return;
+    btn.disabled = true;
+    let ok = 0;
+    for (const t of list.slice(0, limit)) {
+      try {
+        await L.downloadAudio({ url: onlineUrl(t), title: [artistNames(t), t.title].filter(Boolean).join(" - "), thumb: t.thumb });
+        ok += 1;
+      } catch (err) { L.toast(err.message, true); break; }
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    btn.disabled = false;
+    if (ok) L.toast(`Ve frontě stahování: ${songs(ok)}`);
   }
 
   /* Odkaz z YouTube Music / YouTube vložený do hledání */
@@ -1065,9 +1279,16 @@
       const pl = createPlaylist(input.value);
       if (pl) location.hash = "#/music/my/" + encodeURIComponent(pl.id);
     });
-    const nodes = [form, el("p", "muted small m-local-note", "Playlisty se ukládají v tomhle prohlížeči. Skladby přidáš tlačítkem „Do playlistu“ u skladby, celé album nebo playlist tlačítkem „Uložit jako playlist“, frontu v panelu fronty.")];
+    const nodes = [form, el("p", "muted small m-local-note", "Playlisty se ukládají v tomhle prohlížeči. Skladby přidáš tlačítkem „Do playlistu“ u skladby, celé album nebo playlist tlačítkem „Uložit jako playlist“, frontu v panelu fronty. Oblíbené skladby se s účtem ukládají i na server.")];
+    const favCard = el("a", "m-card m-playlist m-fav-card");
+    favCard.href = "#/music/my/favorites";
+    const favCover = el("span", "m-card-cover m-fav-cover");
+    favCover.append(icon("heart"));
+    favCard.append(favCover, el("span", "m-card-title", "Oblíbené skladby"), el("span", "m-card-sub", songs(fav.items.length)));
+    nodes.push(Object.assign(el("div", "m-grid"), {}));
+    nodes[nodes.length - 1].append(favCard);
     if (playlists.length) {
-      const grid = el("div", "m-grid");
+      const grid = nodes[nodes.length - 1];
       for (const pl of playlists) {
         const a = el("a", "m-card m-playlist");
         a.href = "#/music/my/" + encodeURIComponent(pl.id);
@@ -1075,14 +1296,31 @@
                  el("span", "m-card-sub", songs(pl.tracks.length)));
         grid.append(a);
       }
-      nodes.push(grid);
     } else {
-      nodes.push(el("p", "muted", "Zatím nemáš žádný playlist."));
+      nodes.push(el("p", "muted", "Zatím nemáš žádný vlastní playlist."));
     }
     mineBox.replaceChildren(...nodes);
   }
 
+  function pageFavorites() {
+    const tracks = fav.items.map((t) => ({ ...t }));
+    const total = tracks.reduce((s, t) => s + (t.duration || 0), 0);
+    const data = { type: "mine", title: "Oblíbené skladby", thumb: null,
+                   subtitle: [songs(tracks.length), total ? fmt(total) : null].filter(Boolean).join(" · ") };
+    const head = detailHeader(data, tracks, tracks.length ? [downloadAllButton(tracks, "Oblíbené skladby")] : []);
+    $(".m-detail-kind", head).textContent = "Oblíbené";
+    const cover = $(".m-detail-cover", head);
+    cover.replaceChildren(icon("heart"));
+    cover.classList.add("m-fav-cover");
+    const ul = el("ul", "m-tracks");
+    tracks.forEach((t, i) => ul.append(trackRow(t, i, { onPlay: () => playList(tracks, i), actions: trackActions(t, tracks) })));
+    mineBox.replaceChildren(backButton(), head, tracks.length ? ul
+      : el("p", "muted", "Zatím tu nic není. Skladbu přidáš srdíčkem u skladby nebo v přehrávači."));
+    markNow();
+  }
+
   function pageMine(id) {
+    if (id === "favorites") { pageFavorites(); return; }
     const pl = findPlaylist(id);
     if (!pl) {
       mineBox.replaceChildren(backButton(), el("p", "muted", "Tenhle playlist už neexistuje."));
@@ -1098,7 +1336,7 @@
     rename.type = "button";
     const del = el("button", "btn m-danger", "Smazat");
     del.type = "button";
-    const head = detailHeader(data, tracks, [rename, del]);
+    const head = detailHeader(data, tracks, [downloadAllButton(tracks, pl.name), rename, del]);
     $(".m-detail-kind", head).textContent = "Můj playlist";
     head.querySelector(".m-detail-cover").replaceWith(Object.assign(playlistCover(pl), { className: "m-detail-cover m-mosaic" + (pl.tracks.filter((t) => t.thumb).length >= 4 ? " four" : "") }));
 
@@ -1198,6 +1436,7 @@
     try {
       if (parts[1] === "search" && parts[3] != null) await pageSearch(token, parts[2], decodeURIComponent(parts.slice(3).join("/")));
       else if (["album", "artist", "playlist"].includes(parts[1]) && parts[2]) await pageDetail(token, parts[1], decodeURIComponent(parts[2]));
+      else if (parts[1] === "track" && parts[2]) await pageTrack(token, decodeURIComponent(parts[2]));
       else if (parts[1] === "genre" && parts[2]) await pageGenre(token, decodeURIComponent(parts[2]), decodeURIComponent(parts[3] || ""));
       else await pageHome(token);
     } catch (err) {
@@ -1214,4 +1453,6 @@
   renderToggles();
   restoreDir();
   openMusicRoute();
+  renderFav();
+  syncFav();
 })();

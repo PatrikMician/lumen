@@ -11,6 +11,7 @@ Pozor: s language="cs" ytmusicapi nenajde nic ve filtrovaném hledání (počít
 proto se nastavuje jen location.
 """
 import os
+import random
 import re
 import threading
 import time
@@ -235,18 +236,85 @@ def music_status(request: Request):
 
 @router.get("/api/music/home")
 def music_home(request: Request):
+    """Úvod Hudby: pokaždé jiný. Katalog bez přihlášení vrací pořád stejné sekce, proto se zamíchají
+    a přidá se mix podle náhodné skladby a dva náhodné žánry nebo nálady (všechno z mezipaměti)."""
     need_online(request)
 
     def load(y):
         sections = []
-        for s in y.get_home(limit=8):
+        for s in y.get_home(limit=12):
             items = cards(s.get("contents"))
             if items:
                 title = s.get("title") or ""
-                sections.append({"title": HOME_TITLES.get(title.lower(), title), "items": items[:20]})
+                sections.append({"title": HOME_TITLES.get(title.lower(), title), "items": items[:24]})
         return {"sections": sections}
 
-    return cached(("home",), load)
+    base = cached(("home",), load)["sections"]
+    sections = [{**s, "items": random.sample(s["items"], len(s["items"]))} for s in base]
+    random.shuffle(sections)
+    extra = []
+    songs = [i for s in base for i in s["items"] if i.get("type") == "song"]
+    if songs:
+        seed = random.choice(songs)
+        try:
+            mix = _radio(seed["id"])[1:16]
+            if mix:
+                extra.append({"title": f"Podobné jako {seed['title']}", "items": mix})
+        except HTTPException:
+            pass
+    try:
+        moods = [e for s in _genres()["sections"] for e in s["items"]
+                 if s["title"] != "Žánry" or e["title"] in HOME_GENRES]
+        for e in random.sample(moods, min(2, len(moods))):
+            items = _genre_items(e["params"])
+            if items:
+                extra.append({"title": e["title"], "items": random.sample(items, min(14, len(items)))})
+    except HTTPException:
+        pass
+    for s in extra:  # přidané sekce rozházet mezi ostatní, ne až na konec
+        sections.insert(random.randint(0, min(3, len(sections))), s)
+    return {"sections": sections}
+
+
+def _radio(video_id: str) -> list:
+    return cached(("radio", video_id),
+                  lambda y: tracks(y.get_watch_playlist(videoId=video_id, limit=25, radio=True).get("tracks")))
+
+
+@router.get("/api/music/track/{video_id}")
+def music_track(request: Request, video_id: str):
+    """Detail skladby: obal, interpreti, album, délka, rok, přehrání, text písně a podobné skladby."""
+    need_online(request)
+    check_id(video_id)
+
+    def load(y):
+        s = y.get_song(video_id) or {}
+        vd = s.get("videoDetails") or {}
+        mf = (s.get("microformat") or {}).get("microformatDataRenderer") or {}
+        w = y.get_watch_playlist(videoId=video_id, limit=25, radio=True)
+        listed = w.get("tracks") or []
+        me = next((track(t) for t in listed if t.get("videoId") == video_id), None) or {}
+        published = mf.get("publishDate") or mf.get("uploadDate") or ""
+        try:
+            views = int(vd.get("viewCount") or 0) or None
+        except ValueError:
+            views = None
+        return {
+            "type": "song", "id": video_id,
+            "title": me.get("title") or vd.get("title") or "Bez názvu",
+            "artists": me.get("artists") or ([{"name": vd["author"], "id": vd.get("channelId")}] if vd.get("author") else []),
+            "album": me.get("album"),
+            "duration": me.get("duration") or (int(vd["lengthSeconds"]) if str(vd.get("lengthSeconds", "")).isdigit() else None),
+            "thumb": (me.get("thumb") and re.sub(r"=w\d+-h\d+", "=w800-h800", me["thumb"])) or _thumb(vd.get("thumbnail"), 800),
+            "explicit": me.get("explicit", False),
+            "views": views,
+            "published": published[:10] or None,
+            "category": mf.get("category") or None,
+            "lyrics": w.get("lyrics"),
+            "related": [t for t in tracks(listed) if t["id"] != video_id][:20],
+        }
+
+    return cached(("track", video_id), load)
 
 
 @router.get("/api/music/search")
@@ -389,6 +457,10 @@ GENRE_NAMES = {
     "bollywood & indian": "Bollywood a indická",
 }
 GENRE_SECTIONS = {"genres": "Žánry", "moods & moments": "Nálady a chvíle"}
+# žánry, které se náhodně přidávají na úvod Hudby (regionální jako Mandopop nebo Bollywood ne)
+HOME_GENRES = {"Pop", "Rock", "Hip-hop", "Dance a elektronika", "Indie a alternativa", "R&B a soul", "Metal", "Jazz",
+               "Klasická", "Desetiletí", "Country", "Latino", "Folk a akustická", "Reggae", "Soundtracky a muzikály",
+               "Blues"}
 PARAMS_RE = re.compile(r"[\w=-]{6,200}")
 
 
@@ -396,7 +468,10 @@ PARAMS_RE = re.compile(r"[\w=-]{6,200}")
 def music_genres(request: Request):
     """Žánry a nálady z katalogu; každá položka nese `params` pro /api/music/genre."""
     need_online(request)
+    return _genres()
 
+
+def _genres() -> dict:
     def load(y):
         sections = []
         for title, items in y.get_mood_categories().items():
@@ -451,7 +526,11 @@ def music_genre(request: Request, params: str):
     need_online(request)
     if not PARAMS_RE.fullmatch(params or ""):
         raise HTTPException(400, "Neplatný odkaz na hudbu.")
-    return cached(("genre", params), lambda y: {"items": cards(_mood_playlists(y, params))[:80]})
+    return {"items": _genre_items(params)}
+
+
+def _genre_items(params: str) -> list:
+    return cached(("genre", params), lambda y: {"items": cards(_mood_playlists(y, params))[:80]})["items"]
 
 
 # --------------------------------------------------------------------------

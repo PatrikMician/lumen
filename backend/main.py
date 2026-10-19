@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from yt_dlp.version import __version__ as YTDLP_VERSION
 
-from . import keyrequests, library, music, quota, remotekeys, updater
+from . import accounts, keyrequests, library, music, quota, remotekeys, updater
 
 APP_DIR = Path(os.getenv("APP_DIR") or quota.DATA_DIR / "app")  # server: aplikace ke stažení (viz APP_FILES)
 # platforma -> (vzor názvu souboru, typ při stažení); nabízí se nejvyšší verze
@@ -161,7 +161,8 @@ def save_owner(jid: str, sid: str):
 # --------------------------------------------------------------------------
 # Limity a kontrola vstupu
 # --------------------------------------------------------------------------
-_history: dict = {"download": {}, "info": {}, "key": {}, "request": {}, "approve": {}, "music": {}, "music_track": {}}
+_history: dict = {"download": {}, "info": {}, "key": {}, "request": {}, "approve": {}, "music": {}, "music_track": {},
+                  "login": {}, "register": {}, "reset": {}}
 _history_lock = threading.Lock()
 
 
@@ -187,9 +188,13 @@ def current_key(request: Request):
     Zrušený nebo uvolněný klíč, případně klíč zkopírovaný na jiné zařízení, neplatí.
     V PC verzi klíč ověřuje server Lumenu (s mezipamětí, viz remotekeys)."""
     if remotekeys.enabled():
-        rec, _ = remotekeys.check(request.cookies.get(KEY_COOKIE, ""))
+        rec, _ = remotekeys.check(request.cookies.get(KEY_COOKIE, "") or accounts.app_key())
         return rec
     rec, _ = quota.get_key(request.cookies.get(KEY_COOKIE, ""), request.state.sid)
+    if not rec:  # přihlášený účet s klíčem: klíč platí i tady (zařízení se přiřadí, dokud je místo)
+        acc = web_account(request)
+        if acc and acc[1].get("key"):
+            rec, _ = quota.get_key(acc[1]["key"], request.state.sid, bind=True)
     return rec
 
 
@@ -466,6 +471,10 @@ def set_key(body: KeyIn, request: Request, response: Response):
         KEY_COOKIE, quota.normalize(body.key), max_age=60 * 60 * 24 * 365, httponly=True, samesite="lax",
         secure=request.headers.get("x-forwarded-proto", request.url.scheme) == "https",
     )
+    if not remotekeys.enabled():
+        acc = web_account(request)
+        if acc and not acc[1].get("key"):
+            accounts.update_user(acc[0], key=quota.normalize(body.key))
     return {"ok": True, "label": rec["label"]}
 
 
@@ -582,6 +591,261 @@ def remote_increase(body: RemoteIncreaseIn, request: Request, background: Backgr
     if not rec:
         raise HTTPException(403, "O víc zařízení jde požádat jen s aktivním přístupovým klíčem.")
     return increase_core(rec, body, request, background)
+
+
+# --- Účty (e-mail + heslo, klíč patří účtu, oblíbené skladby) ----------------------
+class AccountIn(BaseModel):
+    email: str
+    password: str
+
+
+class ResetIn(BaseModel):
+    email: str
+
+
+class ResetConfirmIn(BaseModel):
+    token: str
+    password: str
+
+
+class FavoritesIn(BaseModel):
+    items: list = []
+    ts: float = 0
+
+
+class RemoteAccountIn(BaseModel):
+    email: str = ""
+    password: str = ""
+    device: str = ""
+    token: str = ""
+    key: str = ""
+    items: list = []
+    ts: float = 0
+
+
+def web_account(request: Request):
+    """(uid, účet, zařízení) přihlášeného návštěvníka webu, jinak None."""
+    return accounts.user_for_token(request.cookies.get(accounts.COOKIE, ""))
+
+
+def _set_account_cookie(request: Request, response: Response, token: str):
+    response.set_cookie(accounts.COOKIE, token, max_age=60 * 60 * 24 * accounts.SESSION_DAYS, httponly=True,
+                        samesite="lax", secure=request.headers.get("x-forwarded-proto", request.url.scheme) == "https")
+
+
+def _account_email(raw: str) -> str:
+    email = keyrequests.valid_email(raw)
+    if not email:
+        raise HTTPException(400, "Zadej platnou e-mailovou adresu, třeba jmeno@seznam.cz.")
+    return email
+
+
+def _attach_device_key(uid: str, user: dict, request: Request):
+    """Účet bez klíče převezme klíč, který má tohle zařízení aktivní."""
+    if user.get("key"):
+        return
+    cookie = request.cookies.get(KEY_COOKIE, "")
+    rec, _ = quota.get_key(cookie, request.state.sid)
+    if rec:
+        accounts.update_user(uid, key=quota.normalize(cookie))
+
+
+def _account_out(user: Optional[dict], app: bool = False) -> dict:
+    return {"enabled": True, "app": app, "logged": bool(user), "email": user.get("email") if user else None,
+            "has_key": bool(user and user.get("key")), "reset": keyrequests.mail_configured() and bool(keyrequests.PUBLIC_URL)}
+
+
+def _remote(path: str, payload: dict) -> dict:
+    """Aplikace: účet vyřizuje server Lumenu (jen když běží)."""
+    remotekeys._down["until"] = 0.0  # uživatel to chce teď: zkusit hned, i když byl server před chvílí vypnutý
+    status, data = remotekeys._request("POST", path, payload)
+    if status == 200:
+        return data
+    raise HTTPException(status or 503, data.get("detail") or "Server Lumenu žádost nepřijal.")
+
+
+@app.get("/api/account")
+def account_status(request: Request):
+    if DESKTOP:
+        a = accounts.app_load()
+        return _account_out({"email": a["email"], "key": a.get("key")} if a.get("token") else None, app=True)
+    acc = web_account(request)
+    return _account_out(acc[1] if acc else None)
+
+
+@app.post("/api/account/register")
+def account_register(body: AccountIn, request: Request, response: Response):
+    email = _account_email(body.email)
+    if DESKTOP:
+        return app_login("/api/remote/account/register", email, body.password)
+    rate_check("register", quota.who(request), 5, 24 * 3600, "Dnes už jsi založil hodně účtů. Zkus to zítra.")
+    uid = accounts.register(email, body.password)
+    token = accounts.new_session(uid, request.state.sid)
+    _set_account_cookie(request, response, token)
+    _attach_device_key(uid, accounts.user_for_token(token)[1], request)
+    return account_status_after(token)
+
+
+@app.post("/api/account/login")
+def account_login(body: AccountIn, request: Request, response: Response):
+    email = _account_email(body.email)
+    if DESKTOP:
+        return app_login("/api/remote/account/login", email, body.password)
+    rate_check("login", quota.who(request), 10, 3600, "Moc pokusů o přihlášení. Zkus to za hodinu.")
+    uid = accounts.login(email, body.password)
+    token = accounts.new_session(uid, request.state.sid)
+    _set_account_cookie(request, response, token)
+    _attach_device_key(uid, accounts.user_for_token(token)[1], request)
+    return account_status_after(token)
+
+
+def account_status_after(token: str) -> dict:
+    acc = accounts.user_for_token(token)
+    return _account_out(acc[1] if acc else None)
+
+
+def app_login(path: str, email: str, password: str) -> dict:
+    data = _remote(path, {"email": email, "password": password, "device": remotekeys.device_id()})
+    accounts.app_save({"token": data["token"], "email": data["email"], "key": data.get("key") or ""})
+    if data.get("key"):
+        remotekeys.check(data["key"], force=True)  # přiřadí klíč účtu k téhle instalaci
+    return _account_out({"email": data["email"], "key": data.get("key")}, app=True)
+
+
+@app.post("/api/account/logout")
+def account_logout(request: Request, response: Response):
+    if DESKTOP:
+        a = accounts.app_load()
+        if a.get("token"):
+            remotekeys._request("POST", "/api/remote/account/logout", {"token": a["token"]}, timeout=5)
+        accounts.app_save({})
+        return _account_out(None, app=True)
+    accounts.end_session(request.cookies.get(accounts.COOKIE, ""))
+    response.delete_cookie(accounts.COOKIE)
+    return _account_out(None)
+
+
+@app.post("/api/account/key")
+def account_key(request: Request):
+    """Přidá klíč aktivní na tomhle zařízení k účtu (pak funguje na všech zařízeních, kde se přihlásíš)."""
+    cookie = request.cookies.get(KEY_COOKIE, "")
+    if DESKTOP:
+        a = accounts.app_load()
+        if not a.get("token"):
+            raise HTTPException(401, "Nejsi přihlášený.")
+        _remote("/api/remote/account/key", {"token": a["token"], "key": quota.normalize(cookie)})
+        accounts.app_save({**a, "key": quota.normalize(cookie)})
+        return _account_out({"email": a["email"], "key": cookie}, app=True)
+    acc = web_account(request)
+    if not acc:
+        raise HTTPException(401, "Nejsi přihlášený.")
+    rec, _ = quota.get_key(cookie, request.state.sid)
+    if not rec:
+        raise HTTPException(400, "Na tomhle zařízení teď žádný klíč aktivní není.")
+    accounts.update_user(acc[0], key=quota.normalize(cookie))
+    return _account_out({**acc[1], "key": cookie})
+
+
+@app.post("/api/account/reset")
+def account_reset(body: ResetIn, request: Request, background: BackgroundTasks):
+    if DESKTOP:
+        raise HTTPException(400, "Heslo si obnovíš na webu Lumenu.")
+    email = _account_email(body.email)
+    if not keyrequests.mail_configured() or not keyrequests.PUBLIC_URL:
+        raise HTTPException(503, "Obnova hesla e-mailem tu není nastavená. Napiš provozovateli.")
+    rate_check("reset", quota.who(request), 5, 3600, "Moc žádostí o obnovu hesla. Zkus to za hodinu.")
+    token = accounts.start_reset(email)
+    if token:
+        link = f"{keyrequests.PUBLIC_URL}/#/reset/{token}"
+        background.add_task(keyrequests._send, accounts.reset_mail(email, link, keyrequests.MAIL_FROM))
+    return {"ok": True}  # stejná odpověď, ať se nedá zjistit, které e-maily mají účet
+
+
+@app.post("/api/account/reset/confirm")
+def account_reset_confirm(body: ResetConfirmIn):
+    accounts.finish_reset(body.token, body.password)
+    return {"ok": True}
+
+
+@app.get("/api/account/favorites")
+def account_favorites(request: Request):
+    if DESKTOP:
+        a = accounts.app_load()
+        if not a.get("token"):
+            raise HTTPException(401, "Nejsi přihlášený.")
+        return _remote("/api/remote/account/favorites", {"token": a["token"]})
+    acc = web_account(request)
+    if not acc:
+        raise HTTPException(401, "Nejsi přihlášený.")
+    return {"items": acc[1].get("fav", []), "ts": acc[1].get("fav_ts", 0)}
+
+
+@app.put("/api/account/favorites")
+def account_favorites_set(body: FavoritesIn, request: Request):
+    if DESKTOP:
+        a = accounts.app_load()
+        if not a.get("token"):
+            raise HTTPException(401, "Nejsi přihlášený.")
+        return _remote("/api/remote/account/favorites", {"token": a["token"], "items": body.items, "ts": body.ts})
+    acc = web_account(request)
+    if not acc:
+        raise HTTPException(401, "Nejsi přihlášený.")
+    return accounts.set_favorites(acc[0], body.items, body.ts)
+
+
+# --- Účty pro aplikace (volá je PC a Android verze) ---------------------------------
+def _remote_user(token: str) -> tuple:
+    acc = accounts.user_for_token(token)
+    if not acc:
+        raise HTTPException(401, "Přihlášení vypršelo. Přihlas se znovu.")
+    return acc
+
+
+def _remote_session(uid: str, device: str) -> dict:
+    sid = remote_device(device)
+    token = accounts.new_session(uid, sid)
+    user = accounts.user_for_token(token)[1]
+    if user.get("key"):
+        quota.get_key(user["key"], sid, bind=True)  # zařízení aplikace = jedno zařízení klíče
+    return {"token": token, "email": user["email"], "key": user.get("key", "")}
+
+
+@app.post("/api/remote/account/register")
+def remote_account_register(body: RemoteAccountIn, request: Request):
+    remote_device(body.device)
+    rate_check("register", quota.who(request), 5, 24 * 3600, "Dnes už jsi založil hodně účtů. Zkus to zítra.")
+    return _remote_session(accounts.register(_account_email(body.email), body.password), body.device)
+
+
+@app.post("/api/remote/account/login")
+def remote_account_login(body: RemoteAccountIn, request: Request):
+    remote_device(body.device)
+    rate_check("login", quota.who(request), 10, 3600, "Moc pokusů o přihlášení. Zkus to za hodinu.")
+    return _remote_session(accounts.login(_account_email(body.email), body.password), body.device)
+
+
+@app.post("/api/remote/account/logout")
+def remote_account_logout(body: RemoteAccountIn):
+    accounts.end_session(body.token)
+    return {"ok": True}
+
+
+@app.post("/api/remote/account/key")
+def remote_account_key(body: RemoteAccountIn):
+    uid, _, device = _remote_user(body.token)
+    rec, _ = quota.get_key(body.key, device)
+    if not rec:
+        raise HTTPException(400, "Tenhle klíč na tomhle zařízení neplatí.")
+    accounts.update_user(uid, key=quota.normalize(body.key))
+    return {"ok": True}
+
+
+@app.post("/api/remote/account/favorites")
+def remote_account_favorites(body: RemoteAccountIn):
+    uid, user, _ = _remote_user(body.token)
+    if body.ts:
+        return accounts.set_favorites(uid, body.items, body.ts)
+    return {"items": user.get("fav", []), "ts": user.get("fav_ts", 0)}
 
 
 # --- Stažení PC verze -------------------------------------------------------------

@@ -4,8 +4,11 @@ Bez administrátorských práv: rozbalí přibalený payload.zip do %LOCALAPPDAT
 v nabídce Start (a volitelně na ploše) a zapíše Lumen do Aplikací Windows (HKCU), odkud jde odinstalovat.
 `LumenSetup.exe --silent` nainstaluje bez okna (pro testy). `LumenSetup.exe --update` (spouští ho Lumen při
 aktualizaci): počká, až se Lumen ukončí, nainstaluje bez otázek s ukazatelem průběhu a Lumen znovu spustí.
+Stará verze se před instalací vždy smaže (běžící Lumen se nejdřív zavře), takže nová verze jde nainstalovat
+přes starou bez odinstalace. Po instalaci instalátor nabídne, že se sám smaže (při aktualizaci to udělá sám).
 """
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -13,12 +16,70 @@ import time
 import zipfile
 from pathlib import Path
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 PAYLOAD = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / "payload.zip"
 TARGET = Path(os.getenv("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "Programs" / "Lumen"
 START_MENU = Path(os.getenv("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Lumen.lnk"
 DESKTOP = Path.home() / "Desktop" / "Lumen.lnk"
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen"
+NO_WINDOW = 0x08000000
+
+def clean_env() -> dict:
+    """Prostředí pro spuštění jiného zabaleného programu (Lumen ↔ instalátor). Bez toho nový proces zdědí
+    proměnné PyInstalleru (_PYI_*) a nespustí se (OSError: Invalid argument: …Lumen.exe)."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("_PYI") and k != "_MEIPASS2"}
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
+
+
+def launch_lumen(exe: Path):
+    subprocess.Popen([str(exe)], cwd=str(exe.parent), env=clean_env())
+
+
+def stop_lumen(wait: int = 15):
+    """Zavře běžící Lumen (i proces na pozadí, třeba kontrolu aktualizace), jinak by nešel přepsat."""
+    if not lumen_running():
+        return
+    # nejdřív slušně (jako zavření okna křížkem), Lumen se pak ukončí sám
+    subprocess.run(["taskkill", "/IM", "Lumen.exe"], capture_output=True, creationflags=NO_WINDOW)
+    end = time.time() + wait
+    while lumen_running() and time.time() < end:
+        time.sleep(0.5)
+    if lumen_running():
+        subprocess.run(["taskkill", "/F", "/T", "/IM", "Lumen.exe"], capture_output=True, creationflags=NO_WINDOW)
+        time.sleep(1.5)
+
+
+def remove_old():
+    """Smaže starou verzi. Když něco drží soubor, zkusí to znovu a nakonec složku jen odsune (smaže se příště)."""
+    for old in TARGET.parent.glob("Lumen.old-*"):
+        shutil.rmtree(old, ignore_errors=True)
+    if not TARGET.exists():
+        return
+    for _ in range(6):
+        try:
+            shutil.rmtree(TARGET)
+            return
+        except OSError:
+            stop_lumen(wait=2)
+            time.sleep(1)
+    try:
+        TARGET.rename(TARGET.parent / f"Lumen.old-{int(time.time())}")
+    except OSError as e:
+        raise RuntimeError(f"Starou verzi Lumenu se nepodařilo smazat ({e}). Restartuj počítač a spusť instalaci znovu.")
+
+
+def delete_self_later():
+    """Smaže tenhle instalační soubor, až skončí (běžící exe se smazat nedá)."""
+    me = Path(sys.executable)
+    if not getattr(sys, "frozen", False) or me.suffix.lower() != ".exe":
+        return
+    ps = ("for ($i = 0; $i -lt 120; $i++) { Start-Sleep -Seconds 1; "
+          "Remove-Item -LiteralPath $env:LUMEN_SETUP -Force -ErrorAction SilentlyContinue; "
+          "if (-not (Test-Path -LiteralPath $env:LUMEN_SETUP)) { break } }")
+    subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps],
+                     env={**clean_env(), "LUMEN_SETUP": str(me)}, creationflags=NO_WINDOW | 0x00000008,
+                     close_fds=True)
 
 
 def shortcut(lnk: Path, exe: Path):
@@ -55,12 +116,8 @@ def lumen_running() -> bool:
 
 
 def install(desktop: bool, progress=lambda done, total: None) -> Path:
-    if lumen_running():
-        raise RuntimeError("Lumen je spuštěný. Zavři jeho okno a spusť instalaci znovu.")
-    # stará verze pryč (data uživatele jsou jinde, v %LOCALAPPDATA%\Lumen)
-    if TARGET.exists():
-        import shutil
-        shutil.rmtree(TARGET)
+    stop_lumen()
+    remove_old()  # stará verze pryč (data uživatele jsou jinde, v %LOCALAPPDATA%\Lumen)
     TARGET.mkdir(parents=True)
     with zipfile.ZipFile(PAYLOAD) as z:
         items = z.infolist()
@@ -80,14 +137,39 @@ def install(desktop: bool, progress=lambda done, total: None) -> Path:
     return exe
 
 
+def make_window(title: str):
+    """Okno instalátoru: ostré při zvětšení písma ve Windows (DPI), s ikonou Lumenu, velikost podle obsahu."""
+    import ctypes
+    import tkinter as tk
+
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # jinak je okno rozmazané a při 125 %+ se obsah ořízne
+    except Exception:  # noqa: BLE001
+        pass
+    root = tk.Tk()
+    root.title(title)
+    root.resizable(False, False)
+    try:
+        root.iconbitmap(default=sys.executable)  # ikona z exe (místo pírka Tk)
+    except Exception:  # noqa: BLE001
+        pass
+    return root
+
+
+def fit(root):
+    """Po vložení obsahu: okno přesně na obsah a doprostřed obrazovky."""
+    root.update_idletasks()
+    w, h = root.winfo_reqwidth(), root.winfo_reqheight()
+    x = (root.winfo_screenwidth() - w) // 2
+    y = (root.winfo_screenheight() - h) // 3
+    root.geometry(f"{w}x{h}+{x}+{y}")
+
+
 def gui():
     import tkinter as tk
     from tkinter import ttk
 
-    root = tk.Tk()
-    root.title("Instalace Lumenu")
-    root.geometry("460x250")
-    root.resizable(False, False)
+    root = make_window("Instalace Lumenu")
     frame = ttk.Frame(root, padding=20)
     frame.pack(fill="both", expand=True)
     ttk.Label(frame, text=f"Lumen {APP_VERSION}", font=("Segoe UI", 16, "bold")).pack(anchor="w")
@@ -95,15 +177,21 @@ def gui():
                           f"Nainstaluje se do {TARGET}\n(bez práv správce).", justify="left").pack(anchor="w", pady=(6, 10))
     want_desktop = tk.BooleanVar(value=True)
     ttk.Checkbutton(frame, text="Zástupce na ploše", variable=want_desktop).pack(anchor="w")
-    bar = ttk.Progressbar(frame, maximum=1000)
+    bar = ttk.Progressbar(frame, maximum=1000, length=420)
     bar.pack(fill="x", pady=12)
-    status = ttk.Label(frame, text="")
+    status = ttk.Label(frame, text="", wraplength=420, justify="left")
     status.pack(anchor="w")
     buttons = ttk.Frame(frame)
     buttons.pack(anchor="e", pady=(8, 0))
     state = {"exe": None}
 
     def run_install():
+        from tkinter import messagebox
+
+        if lumen_running() and not messagebox.askyesno(
+                "Instalace Lumenu", "Lumen teď běží. Zavřít ho a pokračovat v instalaci?\n"
+                                    "(Rozpracovaná stažení se přeruší.)"):
+            return
         go.config(state="disabled")
         status.config(text="Instaluji…")
 
@@ -119,60 +207,56 @@ def gui():
         threading.Thread(target=worker, daemon=True).start()
 
     def finished():
+        from tkinter import messagebox
+
         status.config(text="Hotovo. Lumen najdeš v nabídce Start.")
         go.config(text="Spustit Lumen", state="normal", command=launch)
         cancel.config(text="Zavřít")
+        if messagebox.askyesno("Instalace Lumenu", f"Lumen je nainstalovaný.\n\nSmazat instalační soubor "
+                               f"{Path(sys.executable).name}? Už ho nebudeš potřebovat, další verze si Lumen "
+                               "stáhne sám.", parent=root):
+            delete_self_later()
 
     def launch():
-        subprocess.Popen([str(state["exe"])], cwd=str(TARGET))
+        launch_lumen(state["exe"])
         root.destroy()
 
     go = ttk.Button(buttons, text="Instalovat", command=run_install)
     go.pack(side="left", padx=4)
     cancel = ttk.Button(buttons, text="Zrušit", command=root.destroy)
     cancel.pack(side="left")
+    fit(root)
     root.mainloop()
-
-
-def wait_for_lumen(seconds: int = 30):
-    """Aktualizace: Lumen se po spuštění instalátoru sám ukončí; když ne, ukončí se natvrdo."""
-    end = time.time() + seconds
-    while lumen_running() and time.time() < end:
-        time.sleep(0.5)
-    if lumen_running():
-        subprocess.run(["taskkill", "/F", "/IM", "Lumen.exe"], capture_output=True, creationflags=0x08000000)
-        time.sleep(1)
 
 
 def update_gui():
     import tkinter as tk
     from tkinter import ttk
 
-    root = tk.Tk()
-    root.title("Aktualizace Lumenu")
-    root.geometry("420x150")
-    root.resizable(False, False)
+    root = make_window("Aktualizace Lumenu")
     root.attributes("-topmost", True)
     frame = ttk.Frame(root, padding=20)
     frame.pack(fill="both", expand=True)
     ttk.Label(frame, text=f"Aktualizuji Lumen na verzi {APP_VERSION}…", font=("Segoe UI", 12, "bold")).pack(anchor="w")
-    bar = ttk.Progressbar(frame, maximum=1000)
+    bar = ttk.Progressbar(frame, maximum=1000, length=420)
     bar.pack(fill="x", pady=14)
-    status = ttk.Label(frame, text="Čekám, až se Lumen zavře…")
+    status = ttk.Label(frame, text="Čekám, až se Lumen zavře…", wraplength=420, justify="left")
     status.pack(anchor="w")
 
     def worker():
         try:
-            wait_for_lumen()
+            stop_lumen(wait=30)  # Lumen se po spuštění instalátoru sám ukončí
             root.after(0, status.config, {"text": "Instaluji…"})
             exe = install(DESKTOP.exists(), lambda d, t: root.after(0, bar.config, {"value": d * 1000 // t}))
         except Exception as e:  # noqa: BLE001
             root.after(0, status.config, {"text": f"Aktualizace se nepovedla: {e}"})
             return
-        subprocess.Popen([str(exe)], cwd=str(exe.parent))
+        launch_lumen(exe)
+        delete_self_later()  # stažená aktualizace už není potřeba
         root.after(800, root.destroy)
 
     threading.Thread(target=worker, daemon=True).start()
+    fit(root)
     root.mainloop()
 
 

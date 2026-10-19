@@ -141,6 +141,111 @@
   }
   addEventListener("hashchange", route);
 
+  /* ---------- Pozadí: záře sleduje kurzor (prst), bez pohybu se pomalu vznáší ---------- */
+  (() => {
+    const a = document.querySelector(".bg-blob.a"), b = document.querySelector(".bg-blob.b");
+    if (!a || matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      if (a) { a.style.transform = "translate(50vw, 30vh)"; b.style.transform = "translate(30vw, 70vh)"; }
+      return;
+    }
+    let tx = innerWidth / 2, ty = innerHeight * 0.35, ax = tx, ay = ty, bx = tx, by = ty, last = 0;
+    const follow = (x, y) => { tx = x; ty = y; last = performance.now(); };
+    addEventListener("pointermove", (e) => follow(e.clientX, e.clientY), { passive: true });
+    addEventListener("touchmove", (e) => { const t = e.touches[0]; if (t) follow(t.clientX, t.clientY); }, { passive: true });
+    function frame(now) {
+      if (now - last > 4000) {  // bez pohybu: pomalá dráha kolem středu
+        const t = now / 9000;
+        tx = innerWidth * (0.5 + 0.28 * Math.cos(t));
+        ty = innerHeight * (0.4 + 0.22 * Math.sin(t * 1.3));
+      }
+      ax += (tx - ax) * 0.06; ay += (ty - ay) * 0.06;  // hlavní záře jde za kurzorem s plynulým zpožděním
+      bx += (innerWidth - tx - bx) * 0.025; by += (innerHeight - ty - by) * 0.025;  // druhá na opačné straně
+      a.style.transform = `translate(${ax}px, ${ay}px)`;
+      b.style.transform = `translate(${bx}px, ${by}px)`;
+      requestAnimationFrame(frame);
+    }
+    a.style.transform = `translate(${ax}px, ${ay}px)`;  // výchozí poloha hned, ne až po prvním snímku
+    b.style.transform = `translate(${bx}px, ${by}px)`;
+    requestAnimationFrame(frame);
+  })();
+
+  /* ---------- Účet: přihlášení e-mailem a heslem (klíč a oblíbené na všech zařízeních) ---------- */
+  let ACC = null;
+  function renderAccount(a) {
+    ACC = a;
+    $("#accountGroup").hidden = !a || !a.enabled;
+    if (!a || !a.enabled) return;
+    $("#accountOut").hidden = a.logged;
+    $("#accountIn").hidden = !a.logged;
+    $("#accountForgot").hidden = a.app || !a.reset;
+    if (a.app) $("#accountHelp").textContent = "S účtem máš přístupový klíč a oblíbené skladby na každém zařízení. Přihlásit se jde, když je server Lumenu zapnutý, pak účet funguje i bez něj.";
+    if (a.logged) {
+      $("#accountWho").textContent = a.email;
+      const active = Q && Q.has_key;
+      $("#accountKeyText").textContent = a.has_key
+        ? (active ? "Přístupový klíč je u účtu a funguje i tady." : "Účet má klíč, ale ten už je na nejvyšším počtu zařízení. O víc zařízení požádáš níž v části Přístup.")
+        : (active ? "Klíč z tohoto zařízení můžeš přidat k účtu, pak bude fungovat všude, kde se přihlásíš." : "Účet zatím nemá přístupový klíč. Zadej ho níž v části Přístup a uloží se k účtu.");
+      $("#accountAttach").hidden = a.has_key || !active;
+    }
+  }
+  async function loadAccount() {
+    try { renderAccount(await api("/api/account")); } catch { renderAccount(null); }
+  }
+  function accountDone(a, msg) {
+    $("#accountPassword").value = "";
+    renderAccount(a);
+    toast(msg);
+    dispatchEvent(new CustomEvent("lumen-account", { detail: a }));
+    loadQuota();
+  }
+  async function accountSubmit(path, okMsg) {
+    const email = $("#accountEmail").value.trim(), password = $("#accountPassword").value;
+    if (!email || !password) { toast("Vyplň e-mail a heslo.", true); return; }
+    try { accountDone(await api(path, { method: "POST", body: { email, password } }), okMsg); }
+    catch (err) { toast(err.message, true); }
+  }
+  $("#accountForm").addEventListener("submit", (e) => { e.preventDefault(); accountSubmit("/api/account/login", "Přihlášeno"); });
+  $("#accountRegister").addEventListener("click", () => accountSubmit("/api/account/register", "Účet vytvořen, jsi přihlášený"));
+  $("#accountLogout").addEventListener("click", async () => {
+    try { accountDone(await api("/api/account/logout", { method: "POST" }), "Odhlášeno"); } catch (err) { toast(err.message, true); }
+  });
+  $("#accountAttach").addEventListener("click", async () => {
+    try { accountDone(await api("/api/account/key", { method: "POST" }), "Klíč je teď u účtu"); } catch (err) { toast(err.message, true); }
+  });
+  $("#accountForgot").addEventListener("click", async () => {
+    const email = $("#accountEmail").value.trim();
+    if (!email) { toast("Napiš svůj e-mail a klikni znovu na Zapomenuté heslo.", true); $("#accountEmail").focus(); return; }
+    try {
+      await api("/api/account/reset", { method: "POST", body: { email } });
+      toast("Pokud účet s tímhle e-mailem existuje, přišel ti odkaz pro nové heslo.");
+    } catch (err) { toast(err.message, true); }
+  });
+  // odkaz z e-mailu: #/reset/<token>
+  let resetToken = null;
+  function checkReset() {
+    const m = location.hash.match(/^#\/reset\/([\w-]{10,})$/);
+    if (!m) return;
+    resetToken = m[1];
+    location.replace("#/settings");
+    $("#accountForm").hidden = true;
+    $("#resetForm").hidden = false;
+    $("#accountTitle").textContent = "Nové heslo";
+    $("#resetPassword").focus();
+  }
+  $("#resetForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      await api("/api/account/reset/confirm", { method: "POST", body: { token: resetToken, password: $("#resetPassword").value } });
+      toast("Heslo změněno, teď se přihlas.");
+      $("#resetForm").hidden = true;
+      $("#accountForm").hidden = false;
+      $("#accountTitle").textContent = "Přihlášení";
+    } catch (err) { toast(err.message, true); }
+  });
+  addEventListener("hashchange", checkReset);
+  checkReset();
+  loadAccount();
+
   /* Přepínání sekcí tažením prstu doleva/doprava (telefon, Android aplikace). Ne v posuvných řadách,
      polích, přehrávači a u okraje obrazovky (tam je systémové gesto Zpět). */
   (() => {
@@ -860,6 +965,7 @@
     try {
       Q = await api("/api/quota");
       renderQuota();
+      if (ACC) renderAccount(ACC);  // „klíč funguje i tady“ podle nového stavu
       quotaListeners.forEach((fn) => { try { fn(Q); } catch { /* chyba v posluchači nesmí shodit limit */ } });
     } catch { /* server ještě startuje */ }
     // kdyby se mezitím uvolnilo místo v limitu nebo klíč zrušili, stav se po čase obnoví

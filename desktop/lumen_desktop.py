@@ -27,7 +27,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 KEY_SERVER = "https://lumen.mican.dpdns.org"
 UPDATE_TASK = "LumenUpdate"
 LOCAL = Path(os.getenv("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "Lumen"
@@ -42,6 +42,14 @@ LOCAL.mkdir(parents=True, exist_ok=True)
 if FROZEN or sys.stdout is None:
     _log = open(LOCAL / "lumen.log", "a", encoding="utf-8", buffering=1)
     sys.stdout = sys.stderr = _log
+
+
+def clean_env() -> dict:
+    """Prostředí pro spuštění jiného zabaleného programu (Lumen ↔ instalátor). Bez toho nový proces zdědí
+    proměnné PyInstalleru (_PYI_*) a nespustí se (OSError: Invalid argument: …Lumen.exe)."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("_PYI") and k != "_MEIPASS2"}
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
 
 
 def log(msg: str):
@@ -424,7 +432,7 @@ def check_update():
         None, f"Je dostupná aktualizace Lumenu {info['version']} (máš {APP_VERSION}).\n"
               "Doporučujeme aktualizovat hned. Aktualizovat teď?", "Aktualizace Lumenu", 0x24 | 0x40000 | 0x10000)
     if answer == yes:
-        subprocess.Popen([sys.executable, "--update"], cwd=str(Path(sys.executable).parent))
+        subprocess.Popen([sys.executable, "--update"], cwd=str(Path(sys.executable).parent), env=clean_env())
 
 
 def main():
@@ -473,6 +481,8 @@ def main():
         server.should_exit = True
         time.sleep(0.5)
         log("Lumen ukončen")
+        # okno a vlákna (WebView2, pythonnet) by proces jinak chvíli držela a instalace nové verze by narazila
+        os._exit(0)
 
 
 if __name__ == "__main__":

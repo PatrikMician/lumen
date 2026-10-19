@@ -97,6 +97,30 @@ def pyinstaller(*args: str):
     subprocess.run(cmd, check=True, cwd=ROOT)
 
 
+def version_file(name: str, description: str) -> Path:
+    """Údaje o souboru (Vlastnosti → Podrobnosti): vydavatel, produkt, verze. Exe bez nich vypadá podezřeleji."""
+    v = tuple(int(x) for x in APP_VERSION.split(".")) + (0,) * (4 - len(APP_VERSION.split(".")))
+    text = f"""VSVersionInfo(
+  ffi=FixedFileInfo(filevers={v}, prodvers={v}, mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
+  kids=[
+    StringFileInfo([StringTable('040504b0', [
+      StringStruct('CompanyName', 'Patrik Mičian'),
+      StringStruct('FileDescription', '{description}'),
+      StringStruct('FileVersion', '{APP_VERSION}'),
+      StringStruct('InternalName', '{name}'),
+      StringStruct('LegalCopyright', '© Patrik Mičian'),
+      StringStruct('OriginalFilename', '{name}.exe'),
+      StringStruct('ProductName', 'Lumen'),
+      StringStruct('ProductVersion', '{APP_VERSION}')])]),
+    VarFileInfo([VarStruct('Translation', [0x0405, 1200])])
+  ]
+)
+"""
+    path = BUILD / f"version-{name}.txt"
+    path.write_text(text, "utf-8")
+    return path
+
+
 def main():
     BUILD.mkdir(parents=True, exist_ok=True)
     ico = make_icon()
@@ -108,6 +132,7 @@ def main():
             collect += ["--collect-all", dep]
     pyinstaller(
         str(DESKTOP / "lumen_desktop.py"), "--name", "Lumen", "--onedir", "--windowed", "--icon", str(ico),
+        "--version-file", str(version_file("Lumen", "Lumen: stahování videí a hudby")),
         "--paths", str(ROOT),
         "--add-data", f"{ROOT / 'static'}{sep}static",
         "--add-data", f"{pkg_dir('yt_dlp')}{sep}ytdlp_bundled/yt_dlp",
@@ -129,6 +154,7 @@ def main():
     setup_name = f"LumenSetup-{APP_VERSION}"
     pyinstaller(
         str(DESKTOP / "setup_app.py"), "--name", setup_name, "--onefile", "--windowed", "--icon", str(ico),
+        "--version-file", str(version_file(setup_name, "Instalace Lumenu")),
         "--add-data", f"{payload}{sep}.",
     )
     setup = DIST / f"{setup_name}.exe"

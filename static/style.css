@@ -418,6 +418,35 @@ select:disabled { opacity: .5; }
 }
 .app-btn .ico { width: 18px; height: 18px; }
 
+/* Pozadí: barevná záře, která plynule sleduje kurzor (na telefonu prst), jinak se pomalu vznáší */
+.bg-fx { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.bg-blob { position: absolute; left: 0; top: 0; width: 46vmax; height: 46vmax; margin: -23vmax 0 0 -23vmax;
+  border-radius: 50%; filter: blur(70px); opacity: .42; will-change: transform; }
+.bg-blob.a { background: radial-gradient(circle, var(--accent) 0%, transparent 68%); }
+.bg-blob.b { background: radial-gradient(circle, #8b7cff 0%, transparent 68%); opacity: .22; width: 38vmax; height: 38vmax; margin: -19vmax 0 0 -19vmax; opacity: .26; }
+[data-theme="light"] .bg-blob { opacity: .2; }
+[data-theme="light"] .bg-blob.b { opacity: .14; }
+
+/* Účet v Nastavení */
+.account-form { flex-wrap: wrap; }
+.account-btns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* Oblíbené a detail skladby */
+.m-fav .ico { fill: none; transition: fill .15s, color .15s, transform .15s; }
+.m-fav.on .ico { fill: currentColor; color: var(--accent); }
+.m-fav:active .ico { transform: scale(.85); }
+.m-track .m-fav { flex: none; opacity: .55; }
+.m-track .m-fav.on, .m-track:hover .m-fav { opacity: 1; }
+.btn.m-fav { display: inline-flex; align-items: center; gap: 8px; }
+.m-card-cover.m-fav-cover, .m-detail-cover.m-fav-cover { display: grid; place-items: center; background: linear-gradient(135deg, var(--accent), #8b7cff); color: #fff; }
+.m-fav-cover .ico { width: 42%; height: 42%; fill: currentColor; }
+.m-title { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; max-width: 100%; }
+.m-title:disabled { cursor: default; }
+.m-title:not(:disabled):hover { text-decoration: underline; }
+.m-track-artists { font-size: 16px; margin: 2px 0 6px; }
+.m-track-artists a { color: var(--text); }
+.m-lyrics-text { white-space: pre-wrap; font: inherit; line-height: 1.7; margin: 0; max-height: 420px; overflow: auto; }
+
 /* Přepnutí sekce tažením prstu */
 .view.swipe-left { animation: swipe-in-left .22s ease-out; }
 .view.swipe-right { animation: swipe-in-right .22s ease-out; }

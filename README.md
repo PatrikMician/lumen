@@ -224,15 +224,15 @@ Výsledek je `dist\LumenSetup-<verze>.exe` (asi 80 MB, po instalaci asi 150 MB).
 **Stažení z webu:** web Lumenu ukazuje na stránce Stáhnout sekci „Lumen jako aplikace“ s kartami podle toho, co je ve složce `APP_DIR` (výchozí `/var/lib/lumen/app`): „Lumen pro Windows“ pro `LumenSetup-<verze>.exe` (ne na telefonu) a „Lumen pro Android“ pro `Lumen-<verze>.apk` (ne na iPhonu; na Androidu je první). Karta platformy bez souboru se nezobrazí; nabízí se vždy nejvyšší verze. PC verze stejný údaj (`/api/app`) používá, aby uživateli nahlásila novější verzi. Nahrání nové verze z Windows:
 
 ```
-scp dist\LumenSetup-1.2.0.exe mican@mican-server:/tmp/
-ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/LumenSetup-1.2.0.exe /var/lib/lumen/app/LumenSetup-1.2.0.exe"
+scp dist\LumenSetup-1.2.1.exe mican@mican-server:/tmp/
+ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/LumenSetup-1.2.1.exe /var/lib/lumen/app/LumenSetup-1.2.1.exe"
 ```
 
 Android APK se nahrává stejně:
 
 ```
-scp Lumen-1.1.0.apk mican@mican-server:/tmp/
-ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/Lumen-1.1.0.apk /var/lib/lumen/app/Lumen-1.1.0.apk"
+scp Lumen-1.1.1.apk mican@mican-server:/tmp/
+ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/Lumen-1.1.1.apk /var/lib/lumen/app/Lumen-1.1.1.apk"
 ```
 
 Starší verze ve složce nevadí (nabízí se nejvyšší), můžeš je smazat. Verze je v `desktop/lumen_desktop.py` a `desktop/setup_app.py` (`APP_VERSION`). Instalátor není podepsaný, Windows SmartScreen proto při prvním spuštění zobrazí varování (Další informace → Přesto spustit).
@@ -272,6 +272,22 @@ PC i Android verze běží bez serveru. Server Lumenu stačí zapnout jen při v
 - **Aktualizace:** stránka `/update.html` (z oznámení, z pruhu v aplikaci nebo `Lumen.exe --update`) stáhne novou verzi s ukazatelem průběhu a ověří kontrolní součet (`sha256` v `/api/app`). PC spustí `LumenSetup-<verze>.exe --update`: Lumen se zavře, nová verze se nainstaluje a Lumen se znovu otevře. Android otevře instalaci APK (poprvé je potřeba povolit Lumenu „instalovat neznámé aplikace“).
 - **Vydání nové verze:** zvýšit verzi (`APP_VERSION` v `desktop/lumen_desktop.py` a `desktop/setup_app.py`, `lumenVersion` a `lumenVersionCode` v `android/gradle.properties`), sestavit, nahrát do `APP_DIR` (příkazy výše), zapnout server a nechat ho běžet, dokud se lidé neaktualizují.
 - Odinstalace PC verze naplánovanou úlohu smaže.
+
+## Účty
+
+V Nastavení → Účet se jde přihlásit e-mailem a heslem (nebo účet vytvořit). Bez účtu funguje Lumen dál jako dřív.
+
+- **Klíč patří účtu:** přístupový klíč zadaný přihlášeným uživatelem (nebo tlačítkem „Přidat klíč k účtu“) se uloží k účtu a funguje na každém zařízení, kde se přihlásí. Limit zařízení klíče platí dál: každé přihlášené zařízení je jedno zařízení klíče.
+- **Oblíbené skladby** (srdíčko u skladby, v přehrávači a v detailu skladby) se ukládají v zařízení a u přihlášeného účtu i na server. Když server neběží, uloží se později samy (aplikace to zkouší každé 3 minuty a při návratu do okna).
+- **Aplikace** (PC, Android) se přihlašují přes server, jen když běží; pak si účet pamatují a fungují bez něj.
+- **Zapomenuté heslo:** odkaz e-mailem, potřebuje nastavené SMTP a `PUBLIC_URL` (stejné jako u žádostí o klíč). Platí hodinu.
+- Účty jsou v `DATA_DIR/accounts.json` (hesla jen jako otisk scrypt, přihlášení jako otisky tokenů).
+
+## Hudba: detail skladby, oblíbené, stažení playlistu
+
+- Úvod Hudby je pokaždé jiný: sekce z katalogu se zamíchají a přidá se mix podle náhodné skladby a dva náhodné žánry nebo nálady.
+- **Detail skladby** (Info u skladby nebo klik na název v přehrávači): obal, interpreti, album, délka, rok, počet přehrání, text písně a podobné skladby.
+- **Stáhnout vše** u alba, playlistu, vlastního playlistu a oblíbených: stáhne všechny skladby jako zvuk (bez klíče jen do denního limitu).
 
 ## Knihovna hudby v aplikacích
 

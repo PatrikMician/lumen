@@ -64,7 +64,10 @@ def _run():
         if PLATFORM == "windows":
             _set(phase="installing", percent=100.0, file=str(target))
             flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-            subprocess.Popen([str(target), "--update"], creationflags=flags, close_fds=True)
+            # bez proměnných PyInstalleru (_PYI_*), jinak se instalátor ani nový Lumen nespustí správně
+            env = {k: v for k, v in os.environ.items() if not k.startswith("_PYI") and k != "_MEIPASS2"}
+            env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+            subprocess.Popen([str(target), "--update"], creationflags=flags, close_fds=True, env=env)
             # instalátor počká, až se Lumen ukončí; stránka mezitím ukáže „Instaluji…“
             threading.Timer(2.0, lambda: os._exit(0)).start()
         else:
