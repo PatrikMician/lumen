@@ -27,7 +27,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-APP_VERSION = "1.2.3"
+APP_VERSION = "1.2.4"
 KEY_SERVER = "https://lumen.mican.dpdns.org"
 UPDATE_TASK = "LumenUpdate"
 LOCAL = Path(os.getenv("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "Lumen"

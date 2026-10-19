@@ -23,6 +23,7 @@ from typing import Any, Optional
 from urllib.parse import urlparse
 
 import yt_dlp
+from yt_dlp.postprocessor.common import PostProcessor
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -408,6 +409,8 @@ class DownloadIn(BaseModel):
     cookies_from: Optional[str] = None
     title: Optional[str] = None
     thumbnail: Optional[str] = None
+    meta: Optional[dict] = None  # skladba z Hudby: {title, artists, album, thumb} z katalogu → štítky a obal
+
 
 
 @app.get("/api/health")
@@ -1078,21 +1081,63 @@ def info(body: UrlIn, request: Request):
     }
 
 
+COVER_CODECS = {"mp3", "m4a", "opus", "flac"}
+# obal do souboru čtvercový (náhled videa z YouTube je 16:9, uprostřed oříznout)
+SQUARE_COVER = ["-c:v", "mjpeg", "-vf", "crop='if(gt(ih,iw),iw,ih)':'if(gt(iw,ih),ih,iw)'"]
+
+
+class MusicMeta(PostProcessor):
+    """Štítky skladby z hudebního katalogu (název, interpreti, album, obal) místo názvu videa a kanálu.
+    Běží před stažením, takže je použije i název souboru, FFmpegMetadata a EmbedThumbnail."""
+
+    def __init__(self, meta: dict):
+        super().__init__()
+        self.meta = meta or {}
+
+    def run(self, info):
+        m = self.meta
+        artists = [a.get("name") if isinstance(a, dict) else str(a) for a in (m.get("artists") or [])]
+        artists = [a for a in artists if a]
+        if m.get("title"):
+            info["track"] = str(m["title"])[:300]
+        if artists:
+            info["artist"] = ", ".join(artists)[:300]
+            info["album_artist"] = artists[0][:300]
+        album = m.get("album")
+        if isinstance(album, dict):
+            album = album.get("name")
+        if album:
+            info["album"] = str(album)[:300]
+        thumb = m.get("thumb")
+        if thumb and re.match(r"^https://[\w.-]+\.(googleusercontent|ytimg|ggpht)\.com/", thumb):
+            thumb = re.sub(r"=w\d+-h\d+", "=w1000-h1000", thumb)  # obal alba ve velkém rozlišení
+            info["thumbnails"] = [{"url": thumb, "id": "lumen", "preference": 100}]
+            info["thumbnail"] = thumb
+        return [], info
+
+
 def audio_opts(opts: dict, body) -> dict:
-    """yt-dlp: jen zvuk ve formátu a kvalitě z nastavení, volitelně s obalem."""
+    """yt-dlp: jen zvuk ve formátu a kvalitě z nastavení. Obal se vloží, když je zapnutý v Nastavení,
+    a vždy u skladby z Hudby (body.meta)."""
     codec = body.audio_format if body.audio_format in AUDIO_FORMATS else "mp3"
     pp = {"key": "FFmpegExtractAudio", "preferredcodec": codec}
     if codec in ("mp3", "m4a", "opus") and body.audio_bitrate in ("128", "192", "256", "320"):
         pp["preferredquality"] = body.audio_bitrate
     opts["format"] = "bestaudio/best"
     opts["postprocessors"] = [pp, {"key": "FFmpegMetadata", "add_metadata": True}]
-    if body.embed_cover and codec in ("mp3", "m4a"):
+    if (body.embed_cover or getattr(body, "meta", None)) and codec in COVER_CODECS:
         opts["writethumbnail"] = True
         opts["postprocessors"] += [
             {"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"},
             {"key": "EmbedThumbnail"},
         ]
+        opts["postprocessor_args"] = {"thumbnailsconvertor+ffmpeg_o": SQUARE_COVER}
     return opts
+
+
+def music_filename(opts: dict, folder: Path, prefix: str = ""):
+    """Skladba z Hudby: soubor „Interpret - Název [id]“ (jako v přehrávačích), ne název videa."""
+    opts["outtmpl"] = str(folder / f"{prefix}%(artist,uploader).80B - %(track,title).100B [%(id)s].%(ext)s")
 
 
 def run_download(jid: str, url: str, body: DownloadIn):
@@ -1151,8 +1196,12 @@ def run_download(jid: str, url: str, body: DownloadIn):
             opts["format_sort"] = ["res", "vcodec:vp9", "acodec:opus"]
         opts["postprocessors"] = [{"key": "FFmpegMetadata", "add_metadata": True}]
 
+    if body.mode == "audio" and body.meta:
+        music_filename(opts, out_dir)
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
+            if body.mode == "audio" and body.meta:
+                ydl.add_post_processor(MusicMeta(body.meta), when="pre_process")
             data = ydl.extract_info(url, download=True)
         if data and data.get("_type") == "playlist":
             entries = [x for x in (data.get("entries") or []) if x]
@@ -1212,6 +1261,7 @@ MAX_BATCH = 300
 class BatchTrack(BaseModel):
     url: str
     title: Optional[str] = None
+    meta: Optional[dict] = None
 
 
 class BatchIn(BaseModel):
@@ -1233,7 +1283,7 @@ def run_batch(jid: str, items: list, body: BatchIn):
     tracks_dir.mkdir(parents=True, exist_ok=True)
     n = len(items)
     done_files, failed = [], []
-    for i, (url, title) in enumerate(items):
+    for i, (url, title, meta) in enumerate(items):
         if jid in cancelled:
             break
         label = f"Skladba {i + 1} z {n}"
@@ -1251,9 +1301,18 @@ def run_batch(jid: str, items: list, body: BatchIn):
         opts.update(outtmpl=str(tracks_dir / f"{i + 1:03d} %(title).110B [%(id)s].%(ext)s"), windowsfilenames=True,
                     progress_hooks=[hook])
         audio_opts(opts, body)
+        if meta:
+            opts["writethumbnail"] = opts.get("writethumbnail") or body.audio_format in COVER_CODECS
+            if not any(p["key"] == "EmbedThumbnail" for p in opts["postprocessors"]) and body.audio_format in COVER_CODECS:
+                opts["postprocessors"] += [{"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"},
+                                           {"key": "EmbedThumbnail"}]
+                opts["postprocessor_args"] = {"thumbnailsconvertor+ffmpeg_o": SQUARE_COVER}
+            music_filename(opts, tracks_dir, f"{i + 1:03d} ")
         before = set(tracks_dir.iterdir())
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
+                if meta:
+                    ydl.add_post_processor(MusicMeta(meta), when="pre_process")
                 ydl.extract_info(url, download=True)
             new = [f for f in tracks_dir.iterdir() if f not in before and f.suffix.lower() not in SKIP_SUFFIXES]
             if not new:
@@ -1302,7 +1361,7 @@ def download_batch(body: BatchIn, request: Request):
     for t in body.tracks[:MAX_BATCH]:
         t = BatchTrack(**t) if isinstance(t, dict) else None
         if t:
-            items.append((clean_url(t.url), (t.title or "")[:200]))
+            items.append((clean_url(t.url), (t.title or "")[:200], t.meta))
     if not items:
         raise HTTPException(400, "Playlist je prázdný.")
     check_capacity(request.state.sid)

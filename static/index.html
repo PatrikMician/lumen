@@ -16,7 +16,7 @@
       document.documentElement.dataset.accent = s.accent || "amber";
     } catch (e) {}
   </script>
-  <link rel="stylesheet" href="/style.css?v=17">
+  <link rel="stylesheet" href="/style.css?v=20">
 </head>
 <body>
 <div class="bg-fx" aria-hidden="true"><span class="bg-blob a"></span><span class="bg-blob b"></span></div>
@@ -413,7 +413,7 @@
   <input id="mSeek" class="m-seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Pozice ve skladbě">
   <div class="m-now">
     <div class="m-cover"><img id="mCover" alt="" referrerpolicy="no-referrer" hidden><svg class="ico"><use href="#i-music"/></svg></div>
-    <div class="m-meta"><button type="button" id="mTitle" class="m-title" title="Informace o skladbě"></button><p id="mArtist" class="m-artist"></p></div>
+    <div class="m-meta"><p id="mTitle" class="m-title"></p><p id="mArtist" class="m-artist"></p></div>
     <button type="button" id="mFav" class="icon-btn m-fav" aria-label="Přidat do oblíbených" aria-pressed="false" hidden><svg class="ico"><use href="#i-heart"/></svg></button>
   </div>
   <div class="m-ctrl">
@@ -431,6 +431,45 @@
     <button type="button" id="mQueueBtn" class="icon-btn" aria-label="Fronta skladeb" aria-controls="mQueue" aria-expanded="false"><svg class="ico"><use href="#i-queue"/></svg></button>
   </div>
 </div>
+
+<section id="mFull" class="m-full" aria-label="Přehrává se" hidden>
+  <div id="mFullBg" class="m-full-bg" aria-hidden="true"></div>
+  <header class="m-full-head">
+    <button type="button" id="mFullClose" class="icon-btn" aria-label="Zavřít"><svg class="ico"><use href="#i-back"/></svg></button>
+    <span class="muted small">Přehrává se</span>
+  </header>
+  <div class="m-full-body">
+    <div class="m-full-player">
+      <div class="m-full-cover"><img id="mFullCover" alt="" referrerpolicy="no-referrer" hidden><svg class="ico"><use href="#i-music"/></svg></div>
+      <div class="m-full-meta">
+        <div>
+          <h2 id="mFullTitle" class="m-full-title"></h2>
+          <p id="mFullArtist" class="m-full-artist"></p>
+          <p id="mFullAlbum" class="muted small"></p>
+        </div>
+        <button type="button" id="mFullFav" class="icon-btn m-fav" aria-label="Přidat do oblíbených"><svg class="ico"><use href="#i-heart"/></svg></button>
+      </div>
+      <input id="mFullSeek" class="m-seek m-full-seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Pozice ve skladbě">
+      <div class="m-full-times muted small"><span id="mFullPos">0:00</span><span id="mFullLeft"></span></div>
+      <div class="m-full-ctrl">
+        <button type="button" id="mFullShuffle" class="icon-btn m-toggle" aria-label="Náhodné pořadí"><svg class="ico"><use href="#i-shuffle"/></svg></button>
+        <button type="button" id="mFullPrev" class="icon-btn" aria-label="Předchozí"><svg class="ico"><use href="#i-prev"/></svg></button>
+        <button type="button" id="mFullPlay" class="m-full-play" aria-label="Přehrát"><svg class="ico"><use href="#i-play"/></svg></button>
+        <button type="button" id="mFullNext" class="icon-btn" aria-label="Další"><svg class="ico"><use href="#i-next"/></svg></button>
+        <button type="button" id="mFullRepeat" class="icon-btn m-toggle" aria-label="Opakovat"><svg class="ico"><use href="#i-repeat"/></svg><span class="m-one" hidden>1</span></button>
+      </div>
+      <label class="m-full-volume"><svg class="ico"><use href="#i-volume"/></svg><input id="mFullVolume" type="range" min="0" max="100" value="100" aria-label="Hlasitost"></label>
+      <div class="m-full-foot">
+        <span id="mFullFormat" class="m-full-badge" hidden></span>
+        <button type="button" id="mFullInfo" class="link" hidden><svg class="ico"><use href="#i-info"/></svg>Informace o skladbě</button>
+      </div>
+    </div>
+    <div class="m-full-queue">
+      <h3>Fronta <span class="muted">· <span id="mFullCount">0</span></span></h3>
+      <ul id="mFullQueue" class="m-tracks"></ul>
+    </div>
+  </div>
+</section>
 
 <aside id="mQueue" class="drawer m-queue" aria-label="Fronta skladeb" inert>
   <header>
@@ -475,7 +514,7 @@
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <script src="/help.js?v=1" defer></script>
-<script src="/app.js?v=14" defer></script>
-<script src="/music.js?v=12" defer></script>
+<script src="/app.js?v=15" defer></script>
+<script src="/music.js?v=13" defer></script>
 </body>
 </html>

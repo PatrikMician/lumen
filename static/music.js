@@ -43,6 +43,9 @@
   const current = () => queue[index] || null;
 
   function onlineUrl(t) { return "https://music.youtube.com/watch?v=" + t.id; }
+  // štítky z katalogu (název, interpreti, album, obal) → v souboru budou správně i s obalem
+  const trackMeta = (t) => ({ title: t.title, artists: t.artists || [], album: t.album || null, thumb: t.thumb || null });
+  const dlTrack = (t) => ({ url: onlineUrl(t), title: [artistNames(t), t.title].filter(Boolean).join(" - "), thumb: t.thumb, meta: trackMeta(t) });
 
   function fileUrl(file) {
     if (objectUrl) URL.revokeObjectURL(objectUrl);
@@ -257,8 +260,8 @@
     img.hidden = !t.thumb;
     if (t.thumb) img.src = t.thumb; else img.removeAttribute("src");
     $("#mDownload").hidden = t.src !== "online";
-    $("#mTitle").disabled = t.src !== "online";
     if (typeof renderFav === "function") renderFav();
+    if (typeof renderFull === "function") { renderFull(); renderFullQueue(); }
     renderPlayState();
     renderTime();
   }
@@ -337,7 +340,7 @@
   $("#mDownload").addEventListener("click", async () => {
     const t = current();
     if (!t || t.src !== "online") return;
-    try { await L.downloadAudio({ url: onlineUrl(t), title: [artistNames(t), t.title].filter(Boolean).join(" - "), thumb: t.thumb }); }
+    try { await L.downloadAudio(dlTrack(t)); }
     catch (err) { L.toast(err.message, true); }
   });
 
@@ -406,6 +409,103 @@
     const now = $(".m-track.now", list);
     if (now) now.scrollIntoView({ block: "nearest" });
   }
+
+  /* ---------- Velké okno „Přehrává se“: obal, ovládání a fronta (klik na skladbu v liště) ---------- */
+  var full = $("#mFull");  // var: lišta se může vykreslit dřív, než sem kód dojde
+  function fullOpen() { return !!full && !full.hidden; }
+  function openFull(open = true) {
+    if (open && !current()) return;
+    full.hidden = !open;
+    document.body.classList.toggle("m-full-open", open);
+    if (open) { setQueuePanel(false); renderFull(); renderFullQueue(); renderFullTime(); $("#mFullClose").focus(); }
+  }
+  function renderFull() {
+    const t = current();
+    if (!t || !fullOpen()) return;
+    const img = $("#mFullCover");
+    img.hidden = !t.thumb;
+    if (t.thumb) img.src = t.thumb; else img.removeAttribute("src");
+    $("#mFullBg").style.backgroundImage = t.thumb ? `url("${t.thumb.replace(/"/g, "%22")}")` : "";
+    $("#mFullTitle").textContent = t.title;
+    $("#mFullArtist").textContent = artistNames(t) || (t.album && t.album.name) || "";
+    $("#mFullAlbum").textContent = t.album && t.album.name && artistNames(t) ? t.album.name : "";
+    const fmtLabel = t.format || (t.src === "online" ? "Online" : t.file ? (t.file.name.split(".").pop() || "").toUpperCase() : "");
+    $("#mFullFormat").textContent = fmtLabel;
+    $("#mFullFormat").hidden = !fmtLabel;
+    $("#mFullInfo").hidden = t.src !== "online";
+    const fb = $("#mFullFav");
+    fb.dataset.fav = favKey(t);
+    paintFav(fb, isFav(t));
+    renderFullPlay();
+    renderFullToggles();
+  }
+  function renderFullPlay() {
+    if (!fullOpen()) return;
+    const playing = !audio.paused && !audio.ended;
+    $("use", $("#mFullPlay")).setAttribute("href", playing ? "#i-pause" : "#i-play");
+    $("#mFullPlay").setAttribute("aria-label", playing ? "Pozastavit" : "Přehrát");
+  }
+  function renderFullTime() {
+    if (!fullOpen()) return;
+    const t = current();
+    const dur = isFinite(audio.duration) && audio.duration ? audio.duration : (t && t.duration) || 0;
+    const seek = $("#mFullSeek");
+    if (!seek.dataset.drag) seek.value = dur ? String(Math.round((audio.currentTime / dur) * 1000)) : "0";
+    seek.style.setProperty("--p", seek.value / 10 + "%");
+    $("#mFullPos").textContent = fmt(dur * seek.value / 1000);
+    $("#mFullLeft").textContent = dur ? "-" + fmt(Math.max(0, dur - dur * seek.value / 1000)) : "";
+  }
+  function renderFullToggles() {
+    if (!fullOpen()) return;
+    $("#mFullShuffle").classList.toggle("on", P.shuffle);
+    $("#mFullRepeat").classList.toggle("on", P.repeat !== "off");
+    $(".m-one", $("#mFullRepeat")).hidden = P.repeat !== "one";
+    $("#mFullVolume").value = String(Math.round(P.volume * 100));
+  }
+  function renderFullQueue() {
+    if (!fullOpen()) return;
+    const list = $("#mFullQueue");
+    $("#mFullCount").textContent = String(queue.length);
+    list.replaceChildren();
+    queue.forEach((t, i) => {
+      const row = trackRow(t, i, { onPlay: () => load(i), number: i + 1 });
+      if (i < index) row.classList.add("past");
+      const no = el("span", "m-full-no muted small", String(i + 1));
+      row.append(no);
+      list.append(row);
+    });
+    const now = $(".m-track.now", list);
+    if (now) now.scrollIntoView({ block: "nearest" });
+  }
+  $(".m-now", bar).addEventListener("click", (e) => { if (!e.target.closest(".m-fav")) openFull(true); });
+  $("#mFullClose").addEventListener("click", () => openFull(false));
+  addEventListener("keydown", (e) => { if (e.key === "Escape" && fullOpen()) openFull(false); });
+  $("#mFullPlay").addEventListener("click", () => $("#mPlay").click());
+  $("#mFullPrev").addEventListener("click", () => $("#mPrev").click());
+  $("#mFullNext").addEventListener("click", () => $("#mNext").click());
+  $("#mFullShuffle").addEventListener("click", () => { $("#mShuffle").click(); renderFullToggles(); renderFullQueue(); });
+  $("#mFullRepeat").addEventListener("click", () => { $("#mRepeat").click(); renderFullToggles(); });
+  $("#mFullFav").addEventListener("click", () => { const t = current(); if (t) toggleFav(t); });
+  $("#mFullInfo").addEventListener("click", () => {
+    const t = current();
+    if (t && t.src === "online") { openFull(false); location.hash = "#/music/track/" + encodeURIComponent(t.id); }
+  });
+  $("#mFullVolume").addEventListener("input", (e) => {
+    P.volume = e.target.value / 100;
+    audio.volume = P.volume;
+    $("#mVolume").value = e.target.value;
+    savePrefs();
+  });
+  $("#mFullSeek").addEventListener("input", (e) => { e.target.dataset.drag = "1"; renderFullTime(); });
+  $("#mFullSeek").addEventListener("change", (e) => {
+    const dur = audio.duration || 0;
+    if (dur) audio.currentTime = (dur * e.target.value) / 1000;
+    delete e.target.dataset.drag;
+  });
+  audio.addEventListener("timeupdate", renderFullTime);
+  audio.addEventListener("durationchange", renderFullTime);
+  audio.addEventListener("play", renderFullPlay);
+  audio.addEventListener("pause", renderFullPlay);
 
   /* ---------- Text písně ---------- */
   let lyricsRef = null;
@@ -485,7 +585,7 @@
     if (t.src === "online") acts.unshift(["Info", () => { location.hash = "#/music/track/" + encodeURIComponent(t.id); }]);
     if (t.src === "online") {
       acts.push(["Stáhnout", async () => {
-        try { await L.downloadAudio({ url: onlineUrl(t), title: [artistNames(t), t.title].filter(Boolean).join(" - "), thumb: t.thumb }); }
+        try { await L.downloadAudio(dlTrack(t)); }
         catch (err) { L.toast(err.message, true); }
       }]);
     }
@@ -864,16 +964,13 @@
     if (location.hash === "#/music/my/favorites") pageFavorites();
   }
   $("#mFav").addEventListener("click", () => { const t = current(); if (t) toggleFav(t); });
-  $("#mTitle").addEventListener("click", () => {
-    const t = current();
-    if (t && t.src === "online") location.hash = "#/music/track/" + encodeURIComponent(t.id);
-  });
+
 
   addEventListener("storage", (e) => { if (e.key === FAV_KEY) { fav = loadFav(); renderFav(); } });
 
   /* ---------- Stažení skladby a celých playlistů ---------- */
   async function downloadOne(t) {
-    try { await L.downloadAudio({ url: onlineUrl(t), title: [artistNames(t), t.title].filter(Boolean).join(" - "), thumb: t.thumb }); }
+    try { await L.downloadAudio(dlTrack(t)); }
     catch (err) { L.toast(err.message, true); }
   }
 
@@ -901,7 +998,7 @@
     btn.disabled = true;
     try {
       const pick = list.slice(0, limit);
-      const res = await L.downloadBatch(name, pick.map((t) => ({ url: onlineUrl(t), title: [artistNames(t), t.title].filter(Boolean).join(" - ") })),
+      const res = await L.downloadBatch(name, pick.map((t) => ({ url: onlineUrl(t), title: [artistNames(t), t.title].filter(Boolean).join(" - "), meta: trackMeta(t) })),
         (pick.find((t) => t.thumb) || {}).thumb);
       L.toast(`„${name}“ je ve frontě jako jedna úloha (${songs(res.count)}). Výsledek bude ZIP se všemi skladbami.`);
     } catch (err) { L.toast(err.message, true); } finally { btn.disabled = false; }
@@ -1018,8 +1115,16 @@
     if (!d.enabled) return;
     $("#mLibOpen").hidden = !d.can_open;
     $("#mLibNote").textContent = `Stažená hudba se sem ukládá sama (${d.dir}). Skladby ze zařízení sem přidáš importem.`;
-    const tracks = d.tracks.map((x) => ({ ...localTrack(null, LIB + x.name), id: "lib:" + x.name,
-      url: "/api/library/file/" + encodeURIComponent(x.name) }));
+    const tracks = d.tracks.map((x) => {
+      const t = { ...localTrack(null, LIB + x.name), id: "lib:" + x.name, url: "/api/library/file/" + encodeURIComponent(x.name) };
+      if (x.title) t.title = x.title;
+      if (x.artist) t.artists = x.artist.split(/\s*[,;]\s*/).filter(Boolean).map((name) => ({ name }));
+      if (x.album) t.album = { name: x.album };
+      if (x.duration) t.duration = x.duration;
+      if (x.cover) t.thumb = "/api/library/cover/" + encodeURIComponent(x.name);
+      t.format = [x.name.split(".").pop().toUpperCase(), x.bitrate ? x.bitrate + "kbps" : null].filter(Boolean).join(" ");
+      return t;
+    });
     local = local.filter((t) => !t.id.startsWith("lib:"));
     setLocal(tracks, true);
     if (!quiet && !tracks.length) L.toast("Knihovna je zatím prázdná.");

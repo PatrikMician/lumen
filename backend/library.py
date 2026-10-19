@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import List
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 LIB_DIR = Path(os.environ["MUSIC_LIBRARY_DIR"]) if os.getenv("MUSIC_LIBRARY_DIR") else None
 AUDIO_EXT = {".mp3", ".m4a", ".aac", ".opus", ".ogg", ".oga", ".flac", ".wav", ".weba"}
@@ -59,6 +59,63 @@ def add_file(src: Path):
     print(f"Knihovna: uloženo {name}", flush=True)
 
 
+_tag_cache: dict = {}
+
+
+def tags(path: Path) -> dict:
+    """Štítky souboru (mutagen): název, interpret, album, délka, datový tok, jestli má obal."""
+    st = path.stat()
+    key = (path.name, st.st_mtime, st.st_size)
+    if key in _tag_cache:
+        return _tag_cache[key]
+    out = {}
+    try:
+        from mutagen import File as MFile
+
+        easy = MFile(path, easy=True)
+        if easy is not None:
+            first = lambda k: (easy.get(k) or [None])[0]  # noqa: E731
+            out = {"title": first("title"), "artist": first("artist"), "album": first("album")}
+            if easy.info:
+                out["duration"] = round(getattr(easy.info, "length", 0) or 0) or None
+                out["bitrate"] = round((getattr(easy.info, "bitrate", 0) or 0) / 1000) or None
+        out["cover"] = _cover(path) is not None
+    except Exception:  # noqa: BLE001 - poškozený nebo neznámý soubor: jen bez štítků
+        pass
+    if len(_tag_cache) > 5000:
+        _tag_cache.clear()
+    _tag_cache[key] = out
+    return out
+
+
+def _cover(path: Path):
+    """(data, typ) vloženého obalu, nebo None."""
+    from mutagen import File as MFile
+
+    f = MFile(path)
+    if f is None:
+        return None
+    t = getattr(f, "tags", None)
+    if t is not None and hasattr(t, "getall"):  # MP3 (ID3)
+        pics = t.getall("APIC")
+        if pics:
+            return pics[0].data, pics[0].mime or "image/jpeg"
+    if t is not None and "covr" in t:  # M4A
+        c = t["covr"][0]
+        return bytes(c), "image/png" if getattr(c, "imageformat", 0) == 14 else "image/jpeg"
+    pics = getattr(f, "pictures", None)  # FLAC
+    if pics:
+        return pics[0].data, pics[0].mime or "image/jpeg"
+    if t is not None and "metadata_block_picture" in t:  # Opus / Ogg
+        import base64
+
+        from mutagen.flac import Picture
+
+        p = Picture(base64.b64decode(t["metadata_block_picture"][0]))
+        return p.data, p.mime or "image/jpeg"
+    return None
+
+
 def _resolve(name: str) -> Path:
     path = (LIB_DIR / name).resolve()
     if path.parent != LIB_DIR.resolve() or not path.is_file() or path.suffix.lower() not in AUDIO_EXT:
@@ -71,7 +128,7 @@ def library_list():
     if not LIB_DIR:
         return {"enabled": False, "tracks": []}
     _need()
-    tracks = [{"name": f.name, "size": f.stat().st_size, "mtime": f.stat().st_mtime}
+    tracks = [{"name": f.name, "size": f.stat().st_size, "mtime": f.stat().st_mtime, **tags(f)}
               for f in LIB_DIR.iterdir() if f.is_file() and f.suffix.lower() in AUDIO_EXT]
     tracks.sort(key=lambda t: t["name"].lower())
     return {"enabled": True, "dir": str(LIB_DIR), "tracks": tracks, "can_open": os.name == "nt"}
@@ -82,6 +139,15 @@ def library_file(name: str):
     _need()
     path = _resolve(name)
     return FileResponse(path, media_type=TYPES.get(path.suffix.lower(), "audio/mpeg"))
+
+
+@router.get("/api/library/cover/{name}")
+def library_cover(name: str):
+    _need()
+    c = _cover(_resolve(name))
+    if not c:
+        raise HTTPException(404, "Skladba nemá obal.")
+    return Response(c[0], media_type=c[1], headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.post("/api/library/import")

@@ -224,15 +224,15 @@ Výsledek je `dist\LumenSetup-<verze>.exe` (asi 80 MB, po instalaci asi 150 MB).
 **Stažení z webu:** web Lumenu ukazuje na stránce Stáhnout sekci „Lumen jako aplikace“ s kartami podle toho, co je ve složce `APP_DIR` (výchozí `/var/lib/lumen/app`): „Lumen pro Windows“ pro `LumenSetup-<verze>.exe` (ne na telefonu) a „Lumen pro Android“ pro `Lumen-<verze>.apk` (ne na iPhonu; na Androidu je první). Karta platformy bez souboru se nezobrazí; nabízí se vždy nejvyšší verze. PC verze stejný údaj (`/api/app`) používá, aby uživateli nahlásila novější verzi. Nahrání nové verze z Windows:
 
 ```
-scp dist\LumenSetup-1.2.3.exe mican@mican-server:/tmp/
-ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/LumenSetup-1.2.3.exe /var/lib/lumen/app/LumenSetup-1.2.3.exe"
+scp dist\LumenSetup-1.2.4.exe mican@mican-server:/tmp/
+ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/LumenSetup-1.2.4.exe /var/lib/lumen/app/LumenSetup-1.2.4.exe"
 ```
 
 Android APK se nahrává stejně:
 
 ```
-scp Lumen-1.1.2.apk mican@mican-server:/tmp/
-ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/Lumen-1.1.2.apk /var/lib/lumen/app/Lumen-1.1.2.apk"
+scp Lumen-1.1.3.apk mican@mican-server:/tmp/
+ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/Lumen-1.1.3.apk /var/lib/lumen/app/Lumen-1.1.3.apk"
 ```
 
 Starší verze ve složce nevadí (nabízí se nejvyšší), můžeš je smazat. Verze je v `desktop/lumen_desktop.py` a `desktop/setup_app.py` (`APP_VERSION`). Instalátor není podepsaný, Windows SmartScreen proto při prvním spuštění zobrazí varování (Další informace → Přesto spustit).
@@ -288,6 +288,12 @@ V Nastavení → Účet se jde přihlásit e-mailem a heslem (nebo účet vytvo�
 - Úvod Hudby je pokaždé jiný: sekce z katalogu se zamíchají a přidá se mix podle náhodné skladby a dva náhodné žánry nebo nálady.
 - **Detail skladby** (Info u skladby nebo klik na název v přehrávači): obal, interpreti, album, délka, rok, počet přehrání, text písně a podobné skladby.
 - **Stáhnout vše** u alba, playlistu, vlastního playlistu a oblíbených: jedna úloha ve frontě (`/api/download/batch`, nejvýš 300 skladeb), skladby se stáhnou postupně jako zvuk a výsledek je jeden ZIP; v aplikacích se skladby uloží i do knihovny. Nedostupná skladba se přeskočí. Do denního limitu se počítá každá skladba.
+
+## Štítky stažené hudby a okno „Přehrává se“
+
+- Skladba stažená z Hudby (i v playlistu) má štítky z hudebního katalogu: název, interpreti, album a čtvercový obal alba (1000 × 1000) vložený do souboru; soubor se jmenuje „Interpret - Název [id]“. Klient posílá `meta` ({title, artists, album, thumb}) a server je přes vlastní postprocesor yt-dlp (`MusicMeta`) použije pro FFmpegMetadata i EmbedThumbnail. Obal se vkládá do MP3, M4A, Opus a FLAC.
+- Knihovna (aplikace) čte štítky a obal ze souborů (mutagen): `/api/library` vrací název, interpreta, album, délku a datový tok, `/api/library/cover/{soubor}` obal.
+- Klik na skladbu v liště přehrávače otevře velké okno **Přehrává se**: obal, název, interpret, album, posuvník s časem, ovládání, hlasitost, formát (třeba MP3 192kbps) a fronta vedle (na telefonu pod ním).
 
 ## Knihovna hudby v aplikacích
 

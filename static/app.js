@@ -324,7 +324,7 @@
       }
       return false;
     };
-    const blocked = (el) => !!el.closest("input, textarea, select, [contenteditable], dialog, #mBar, .no-swipe") || scrollsX(el);
+    const blocked = (el) => !!el.closest("input, textarea, select, [contenteditable], dialog, #mBar, #mFull, .no-swipe") || scrollsX(el);
     document.addEventListener("touchstart", (e) => {
       const t = e.touches[0];
       on = e.touches.length === 1 && !blocked(e.target) && t.clientX > 24 && t.clientX < innerWidth - 24
@@ -508,11 +508,11 @@
     if (busy) btn.textContent = "Načítám…"; else updateSubmitLabel();
   }
 
-  async function startDownload({ url, title = null, thumbnail = null, mode = null, quiet = false }) {
+  async function startDownload({ url, title = null, thumbnail = null, mode = null, quiet = false, meta = null }) {
     const res = await api("/api/download", {
       method: "POST",
       body: {
-        url, title, thumbnail,
+        url, title, thumbnail, meta,
         mode: mode || S.mode,
         quality: S.quality,
         container: S.container,
@@ -1145,7 +1145,8 @@
   window.Lumen = {
     api, toast, fmtTime,
     // stažení skladby z přehrávače: vždy jako zvuk ve formátu z nastavení
-    downloadAudio: (track, opts = {}) => startDownload({ url: track.url, title: track.title, thumbnail: track.thumb, mode: "audio", quiet: !!opts.quiet }),
+    downloadAudio: (track, opts = {}) => startDownload({ url: track.url, title: track.title, thumbnail: track.thumb, mode: "audio",
+                                                         quiet: !!opts.quiet, meta: track.meta || null }),
     // celý playlist jako jedna úloha (zvuk ve formátu z nastavení, výsledek ZIP)
     downloadBatch: async (name, tracks, thumb) => {
       const res = await api("/api/download/batch", { method: "POST", body: {
