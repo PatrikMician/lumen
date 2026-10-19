@@ -27,7 +27,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 KEY_SERVER = "https://lumen.mican.dpdns.org"
 UPDATE_TASK = "LumenUpdate"
 LOCAL = Path(os.getenv("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "Lumen"
@@ -396,6 +396,16 @@ def uninstall():
 # --------------------------------------------------------------------------
 # Aktualizace na pozadí
 # --------------------------------------------------------------------------
+def clean_update_dir():
+    """Stažený instalátor po aktualizaci už není potřeba (instalátor se smaže i sám, tohle je pojistka)."""
+    time.sleep(20)  # instalátor, který Lumen právě spustil, se ještě zavírá
+    for f in (LOCAL / "update").glob("*"):
+        try:
+            f.unlink()
+        except OSError:
+            pass
+
+
 def ensure_update_task():
     """Naplánovaná úloha (jen pro tohoto uživatele, bez práv správce): kontrola aktualizace každé 4 hodiny."""
     if not FROZEN:
@@ -434,7 +444,7 @@ def check_update():
         None, f"Je dostupná aktualizace Lumenu {info['version']} (máš {APP_VERSION}).\n"
               "Doporučujeme aktualizovat hned. Aktualizovat teď?", "Aktualizace Lumenu", 0x24 | 0x40000 | 0x10000)
     if answer == yes:
-        subprocess.Popen([sys.executable, "--update"], cwd=str(Path(sys.executable).parent), env=clean_env())
+        subprocess.Popen([sys.executable, "--update"], cwd=str(LOCAL), env=clean_env())
 
 
 def main():
@@ -474,6 +484,7 @@ def main():
     INSTANCE.write_text(json.dumps({"port": port, "pid": os.getpid()}), "utf-8")
     threading.Thread(target=update_ytdlp, daemon=True).start()
     threading.Thread(target=ensure_update_task, daemon=True).start()
+    threading.Thread(target=clean_update_dir, daemon=True).start()
     log(f"běží na http://127.0.0.1:{port}/")
 
     try:

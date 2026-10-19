@@ -16,7 +16,7 @@ import time
 import zipfile
 from pathlib import Path
 
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 PAYLOAD = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / "payload.zip"
 TARGET = Path(os.getenv("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "Programs" / "Lumen"
 START_MENU = Path(os.getenv("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Lumen.lnk"
@@ -51,35 +51,52 @@ def stop_lumen(wait: int = 15):
 
 
 def remove_old():
-    """Smaže starou verzi. Když něco drží soubor, zkusí to znovu a nakonec složku jen odsune (smaže se příště)."""
+    """Smaže starou verzi: obsah složky, ne složku samotnou (tu mohl mít jiný proces jako pracovní složku,
+    pak ji Windows nedovolí smazat ani přejmenovat). Zamčený soubor zkusí znovu, nakonec ho jen odsune."""
     for old in TARGET.parent.glob("Lumen.old-*"):
         shutil.rmtree(old, ignore_errors=True)
     if not TARGET.exists():
         return
-    for _ in range(6):
+    stuck = []
+    for attempt in range(6):
+        stuck = []
+        for item in list(TARGET.iterdir()):
+            try:
+                shutil.rmtree(item) if item.is_dir() and not item.is_symlink() else item.unlink()
+            except OSError:
+                stuck.append(item)
+        if not stuck:
+            return
+        stop_lumen(wait=2)
+        time.sleep(1)
+    aside = TARGET.parent / f"Lumen.old-{int(time.time())}"
+    for item in stuck:
         try:
-            shutil.rmtree(TARGET)
+            aside.mkdir(exist_ok=True)
+            item.rename(aside / item.name)  # zamčený soubor jde aspoň přesunout, smaže se příště
+        except OSError as e:
+            raise RuntimeError(f"Starou verzi Lumenu se nepodařilo smazat: soubor {item} je zamčený ({e.strerror}). "
+                               "Zavři Lumen, případně restartuj počítač, a spusť instalaci znovu.")
+
+
+def delete_later(path: Path):
+    """Smaže soubor, až ho nic nedrží: cmd to zkouší 60 s. Příkaz jde jako řetězec (seznam by subprocess
+    obalil uvozovkami po svém a cmd by mu nerozuměl). Mimo „job“ zavaděče PyInstalleru, ať přežije instalátor."""
+    loop = f'for /l %i in (1,1,60) do (ping -n 2 127.0.0.1 >nul & del /f /q "{path}" 2>nul & if not exist "{path}" exit)'
+    for flags in (NO_WINDOW | 0x01000000, NO_WINDOW):  # CREATE_BREAKAWAY_FROM_JOB, kdyby nešlo, bez něj
+        try:
+            subprocess.Popen(f'cmd /d /c "{loop}"', creationflags=flags, env=clean_env(),
+                             cwd=str(path.parent.parent), close_fds=True)
             return
         except OSError:
-            stop_lumen(wait=2)
-            time.sleep(1)
-    try:
-        TARGET.rename(TARGET.parent / f"Lumen.old-{int(time.time())}")
-    except OSError as e:
-        raise RuntimeError(f"Starou verzi Lumenu se nepodařilo smazat ({e}). Restartuj počítač a spusť instalaci znovu.")
+            continue
 
 
 def delete_self_later():
     """Smaže tenhle instalační soubor, až skončí (běžící exe se smazat nedá)."""
     me = Path(sys.executable)
-    if not getattr(sys, "frozen", False) or me.suffix.lower() != ".exe":
-        return
-    ps = ("for ($i = 0; $i -lt 120; $i++) { Start-Sleep -Seconds 1; "
-          "Remove-Item -LiteralPath $env:LUMEN_SETUP -Force -ErrorAction SilentlyContinue; "
-          "if (-not (Test-Path -LiteralPath $env:LUMEN_SETUP)) { break } }")
-    subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps],
-                     env={**clean_env(), "LUMEN_SETUP": str(me)}, creationflags=NO_WINDOW | 0x00000008,
-                     close_fds=True)
+    if getattr(sys, "frozen", False) and me.suffix.lower() == ".exe":
+        delete_later(me)
 
 
 def shortcut(lnk: Path, exe: Path):
@@ -118,7 +135,7 @@ def lumen_running() -> bool:
 def install(desktop: bool, progress=lambda done, total: None) -> Path:
     stop_lumen()
     remove_old()  # stará verze pryč (data uživatele jsou jinde, v %LOCALAPPDATA%\Lumen)
-    TARGET.mkdir(parents=True)
+    TARGET.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(PAYLOAD) as z:
         items = z.infolist()
         total = sum(i.file_size for i in items) or 1
@@ -242,25 +259,50 @@ def update_gui():
     bar.pack(fill="x", pady=14)
     status = ttk.Label(frame, text="Čekám, až se Lumen zavře…", wraplength=420, justify="left")
     status.pack(anchor="w")
+    buttons = ttk.Frame(frame)
+    buttons.pack(anchor="e", pady=(10, 0))
+    retry = ttk.Button(buttons, text="Zkusit znovu", command=lambda: start())
+    close = ttk.Button(buttons, text="Zavřít", command=root.destroy)
+
+    def say(text: str, failed: bool = False):
+        status.config(text=text)
+        if failed:
+            retry.pack(side="left", padx=4)
+            close.pack(side="left")
+        else:
+            retry.pack_forget()
+            close.pack_forget()
+        fit(root)  # delší text (chyba) se jinak ořízne
+
+    def start():
+        say("Čekám, až se Lumen zavře…")
+        threading.Thread(target=worker, daemon=True).start()
 
     def worker():
         try:
             stop_lumen(wait=30)  # Lumen se po spuštění instalátoru sám ukončí
-            root.after(0, status.config, {"text": "Instaluji…"})
+            root.after(0, say, "Instaluji…")
             exe = install(DESKTOP.exists(), lambda d, t: root.after(0, bar.config, {"value": d * 1000 // t}))
         except Exception as e:  # noqa: BLE001
-            root.after(0, status.config, {"text": f"Aktualizace se nepovedla: {e}"})
+            root.after(0, say, f"Aktualizace se nepovedla: {e}\n\nInstalační soubor je {sys.executable}, "
+                                "můžeš ho spustit i ručně.", True)
             return
         launch_lumen(exe)
         delete_self_later()  # stažená aktualizace už není potřeba
         root.after(800, root.destroy)
 
-    threading.Thread(target=worker, daemon=True).start()
     fit(root)
+    start()
     root.mainloop()
 
 
 def main():
+    # pracovní složka nesmí být složka Lumenu (instalátor spuštěný z Lumenu ji zdědí), jinak ji Windows
+    # nedovolí smazat a aktualizace selže
+    try:
+        os.chdir(os.getenv("TEMP") or str(TARGET.parent.parent))
+    except OSError:
+        pass
     if "--update" in sys.argv:
         update_gui()
         return

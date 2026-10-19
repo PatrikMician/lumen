@@ -37,7 +37,10 @@ def _run():
         _set(version=info["version"], phase="downloading", percent=0.0)
         UPDATE_DIR.mkdir(parents=True, exist_ok=True)
         for old in UPDATE_DIR.iterdir():
-            old.unlink(missing_ok=True)
+            try:
+                old.unlink(missing_ok=True)  # starší stažené verze; zamčenou (běží) přeskočit
+            except OSError:
+                pass
         name = f"LumenSetup-{info['version']}.exe" if PLATFORM == "windows" else f"Lumen-{info['version']}.apk"
         part = UPDATE_DIR / (name + ".part")
         digest = hashlib.sha256()
@@ -67,7 +70,8 @@ def _run():
             # bez proměnných PyInstalleru (_PYI_*), jinak se instalátor ani nový Lumen nespustí správně
             env = {k: v for k, v in os.environ.items() if not k.startswith("_PYI") and k != "_MEIPASS2"}
             env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-            subprocess.Popen([str(target), "--update"], creationflags=flags, close_fds=True, env=env)
+            # pracovní složka ne ve složce Lumenu: tu instalátor maže a Windows by ji nedovolil smazat
+            subprocess.Popen([str(target), "--update"], creationflags=flags, close_fds=True, env=env, cwd=str(UPDATE_DIR))
             # instalátor počká, až se Lumen ukončí; stránka mezitím ukáže „Instaluji…“
             threading.Timer(2.0, lambda: os._exit(0)).start()
         else:
