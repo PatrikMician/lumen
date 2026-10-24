@@ -354,6 +354,7 @@
       album: (t.album && t.album.name) || "",
       artwork: t.thumb ? [{ src: t.thumb, sizes: "544x544" }] : [],
     });
+    androidMedia(true);
   }
   if ("mediaSession" in navigator) {
     const ms = navigator.mediaSession;
@@ -364,6 +365,35 @@
     set("nexttrack", () => next());
     set("seekto", (d) => { if (d.seekTime != null) audio.currentTime = d.seekTime; });
   }
+
+  /* Android aplikace: WebView systému přehrávání neohlásí, lištu, zamykací obrazovku a tlačítka sluchátek
+     řeší aplikace (LumenAndroid.mediaState → MediaSession). Povely přijdou zpátky přes window.LumenMedia. */
+  var ANDROID = window.LumenAndroid && window.LumenAndroid.mediaState ? window.LumenAndroid : null;
+  let androidLast = 0;
+  function androidMedia(force = false) {
+    if (!ANDROID) return;
+    const now = Date.now();
+    if (!force && now - androidLast < 5000) return;  // poloha ve skladbě stačí občas, systém ji dopočítá
+    androidLast = now;
+    const t = current();
+    const dur = isFinite(audio.duration) && audio.duration ? audio.duration : (t && t.duration) || 0;
+    ANDROID.mediaState(JSON.stringify(t ? {
+      title: t.title, artist: artistNames(t) || "", album: (t.album && t.album.name) || "",
+      art: t.thumb ? new URL(t.thumb, location.href).href : "",
+      playing: !audio.paused && !audio.ended, position: Math.round(audio.currentTime * 1000), duration: Math.round(dur * 1000),
+    } : { stop: true }));
+  }
+  window.LumenMedia = {
+    control(action, value) {
+      if (action === "play") audio.play().catch(() => {});
+      else if (action === "pause") audio.pause();
+      else if (action === "next") next();
+      else if (action === "prev") prev();
+      else if (action === "seek" && isFinite(value)) audio.currentTime = value / 1000;
+    },
+  };
+  ["play", "pause", "ended", "durationchange", "seeked"].forEach((ev) => audio.addEventListener(ev, () => androidMedia(true)));
+  audio.addEventListener("timeupdate", () => androidMedia());
 
   /* ---------- Fronta (panel) ---------- */
   const qPanel = $("#mQueue");

@@ -71,4 +71,5 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-ktx:1.9.3")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("androidx.media:media:1.7.0")  // MediaSession a mediální oznámení (lišta, sluchátka)
 }

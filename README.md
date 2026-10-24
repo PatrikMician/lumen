@@ -231,8 +231,8 @@ ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/LumenSe
 Android APK se nahrává stejně:
 
 ```
-scp Lumen-1.1.3.apk mican@mican-server:/tmp/
-ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/Lumen-1.1.3.apk /var/lib/lumen/app/Lumen-1.1.3.apk"
+scp Lumen-1.1.4.apk mican@mican-server:/tmp/
+ssh -t mican@mican-server "sudo install -D -o lumen -g lumen -m 644 /tmp/Lumen-1.1.4.apk /var/lib/lumen/app/Lumen-1.1.4.apk"
 ```
 
 Starší verze ve složce nevadí (nabízí se nejvyšší), můžeš je smazat. Verze je v `desktop/lumen_desktop.py` a `desktop/setup_app.py` (`APP_VERSION`). Instalátor není podepsaný, Windows SmartScreen proto při prvním spuštění zobrazí varování (Další informace → Přesto spustit).
@@ -248,6 +248,7 @@ APK `Lumen-<verze>.apk`: Lumen běží celý v telefonu (yt-dlp, ffmpeg i server
 - V Nastavení → Podpora je odkaz **Zobrazit záznam (log)** (jen v aplikacích, `/api/log`), chyby přehrávače se do něj zapisují s kódem.
 - Stažené soubory se ukládají do **Stažené soubory/Lumen**. Odkaz jde do Lumenu poslat přes „Sdílet“ z YouTube.
 - Lumen běží na pozadí (oznámení „Lumen běží“), ukončí se tlačítkem v oznámení.
+- **Ovládání hudby jako u Spotify:** WebView systému přehrávání sám neohlásí, proto aplikace drží vlastní MediaSession (`LumenMedia.kt`). music.js posílá stav přes `LumenAndroid.mediaState`, oznámení se změní na přehrávač (obal, název, ⏮ ⏯ ⏭, posuvník, i na zamykací obrazovce) a tlačítka sluchátek a Bluetooth povely vrací přehrávači (`window.LumenMedia.control`).
 - Android 10 a novější, telefony ARM (arm64-v8a, armeabi-v7a). APK má asi 100 MB.
 
 **Sestavení** (Windows): potřebuje JDK 17 a Android SDK (platform 35, build-tools 35). Skript je hledá v `JAVA_HOME` / `ANDROID_HOME`, jinak ve složce `~/.lumen-android` (`jdk/jdk-17…`, `sdk/`).

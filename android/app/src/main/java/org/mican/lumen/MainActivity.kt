@@ -74,6 +74,11 @@ class MainActivity : ComponentActivity() {
         sharedUrl = sharedText(intent)
         openUpdate = intent?.action == UpdateWorker.ACTION_UPDATE
         UpdateWorker.schedule(this)
+        // povely z lišty, zamykací obrazovky a sluchátek → přehrávač v okně
+        LumenMedia.init(this)
+        LumenMedia.controlHandler = { action, value ->
+            web.evaluateJavascript("window.LumenMedia && LumenMedia.control('$action', $value)", null)
+        }
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
@@ -97,6 +102,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        LumenMedia.controlHandler = null
+        LumenMedia.clear()  // WebView končí, hudba s ním
         LumenRuntime.forget(listener)
         unregisterReceiver(stopped)
         web.destroy()
@@ -207,6 +214,10 @@ class MainActivity : ComponentActivity() {
     inner class Bridge {
         @JavascriptInterface
         fun installUpdate(path: String) = runOnUiThread { installApk(path) }
+
+        /** Stav přehrávače z music.js pro lištu, zamykací obrazovku a sluchátka. */
+        @JavascriptInterface
+        fun mediaState(json: String) = LumenMedia.update(json)
     }
 
     private fun installApk(path: String) {
